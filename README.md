@@ -37,7 +37,7 @@ You also need:
 - A free **NREL API key** — <https://developer.nrel.gov/signup/> (instant).
 - A free **Census API key** — <https://api.census.gov/data/key_signup.html> (instant).
 
-> **Shared resources:** the project's three Snowflake schemas (`RAW`, `CURATED`, `ANALYTICS`) live in **one shared database — `USER_DB_BADGER`**. Each teammate logs in with their *own* user/password but reads and writes to that same shared DB. The `TRAINING_ROLE` already has cross-DB access in this class's setup, so no extra Snowflake grants are needed.
+> **Shared resources:** the project's three Snowflake schemas (`RAW_EV`, `CURATED_EV`, `ANALYTICS_EV`) live in **one shared database — `USER_DB_BADGER`**. Each teammate logs in with their *own* user/password but reads and writes to that same shared DB. The `TRAINING_ROLE` already has cross-DB access in this class's setup, so no extra Snowflake grants are needed.
 
 ---
 
@@ -225,9 +225,9 @@ All four teammates read/write to the **same** three schemas in `USER_DB_BADGER`:
 
 | Schema | Purpose | Populated by |
 |---|---|---|
-| `RAW` | Untransformed JSON / CSV from APIs | Airflow ingestion DAGs |
-| `CURATED` | Cleaned, standardized, joined | dbt `models/staging` + `models/curated` |
-| `ANALYTICS` | Final aggregates for dashboards | dbt `models/analytics` |
+| `RAW_EV` | Untransformed JSON / CSV from APIs | Airflow ingestion DAGs |
+| `CURATED_EV` | Cleaned, standardized, joined | dbt `models/staging` + `models/curated` |
+| `ANALYTICS_EV` | Final aggregates for dashboards | dbt `models/analytics` |
 
 These were created once via `snowflake/setup.sql` (run by Pragya in the Snowflake worksheet UI). You don't need to re-run it.
 
