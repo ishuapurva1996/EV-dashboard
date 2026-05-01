@@ -1,0 +1,33 @@
+-- One-time Snowflake setup for the EV pipeline.
+-- Run this ONCE as the DB owner (BADGER) — usually via the Snowflake web UI worksheet.
+-- Creates the three working schemas in USER_DB_BADGER.
+
+USE ROLE TRAINING_ROLE;
+USE DATABASE USER_DB_BADGER;
+
+CREATE SCHEMA IF NOT EXISTS RAW;
+CREATE SCHEMA IF NOT EXISTS CURATED;
+CREATE SCHEMA IF NOT EXISTS ANALYTICS;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Optional: explicit grants for teammates' users.
+--
+-- The class's TRAINING_ROLE may already give all teammates read/write access
+-- to USER_DB_BADGER. If so, the block below is unnecessary — leave commented.
+--
+-- If a teammate hits "permission denied" when running dbt or querying a
+-- schema, uncomment and run the relevant grants below.
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- GRANT USAGE ON DATABASE USER_DB_BADGER TO ROLE TRAINING_ROLE;
+-- GRANT USAGE ON SCHEMA USER_DB_BADGER.RAW TO ROLE TRAINING_ROLE;
+-- GRANT USAGE ON SCHEMA USER_DB_BADGER.CURATED TO ROLE TRAINING_ROLE;
+-- GRANT USAGE ON SCHEMA USER_DB_BADGER.ANALYTICS TO ROLE TRAINING_ROLE;
+--
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA USER_DB_BADGER.RAW       TO ROLE TRAINING_ROLE;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA USER_DB_BADGER.CURATED   TO ROLE TRAINING_ROLE;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA USER_DB_BADGER.ANALYTICS TO ROLE TRAINING_ROLE;
+--
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON FUTURE TABLES IN SCHEMA USER_DB_BADGER.RAW       TO ROLE TRAINING_ROLE;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON FUTURE TABLES IN SCHEMA USER_DB_BADGER.CURATED   TO ROLE TRAINING_ROLE;
+-- GRANT SELECT, INSERT, UPDATE, DELETE ON FUTURE TABLES IN SCHEMA USER_DB_BADGER.ANALYTICS TO ROLE TRAINING_ROLE;

@@ -33,9 +33,11 @@ End-to-end data pipeline analyzing US EV charging station coverage and cross-ref
 | git | any modern | already on macOS / Windows installer |
 
 You also need:
-- A **Snowflake training account** (`SFEDU02-...`) — from your instructor.
+- Your own **Snowflake training login** (user + password from your instructor) — each teammate has a personal account in the shared `SFEDU02-EAB27764` org.
 - A free **NREL API key** — <https://developer.nrel.gov/signup/> (instant).
 - A free **Census API key** — <https://api.census.gov/data/key_signup.html> (instant).
+
+> **Shared resources:** the project's three Snowflake schemas (`RAW`, `CURATED`, `ANALYTICS`) live in **one shared database — `USER_DB_BADGER`**. Each teammate logs in with their *own* user/password but reads and writes to that same shared DB. The `TRAINING_ROLE` already has cross-DB access in this class's setup, so no extra Snowflake grants are needed.
 
 ---
 
@@ -56,19 +58,15 @@ cd EV-pipeline
 cp .env.example .env
 ```
 
-Open `.env` in an editor and fill in **your own** training-account values:
+The file already has the **shared values** filled in (account, database, schema, role). You only need to fill in the **personal** fields:
 
-| Variable | Example | Notes |
-|---|---|---|
-| `SNOWFLAKE_ACCOUNT` | `SFEDU02-XXXXXXXX` | top-right user menu in Snowflake UI → Account |
-| `SNOWFLAKE_USER` | `EAGLE` | given by instructor |
-| `SNOWFLAKE_PASSWORD` | — | given by instructor |
-| `SNOWFLAKE_ROLE` | `TRAINING_ROLE` | default |
-| `SNOWFLAKE_DATABASE` | `USER_DB_EAGLE` | usually this pattern |
-| `SNOWFLAKE_WAREHOUSE` | `EAGLE_QUERY_WH` | usually this pattern |
-| `SNOWFLAKE_SCHEMA` | `dev_<yourname>` | use a personal schema during dev so your models don't collide with teammates' |
-| `NREL_API_KEY` | — | from registration above |
-| `CENSUS_API_KEY` | — | from registration above |
+| Variable | Where to get it |
+|---|---|
+| `SNOWFLAKE_USER` | your training username (e.g., `EAGLE`) — given by instructor |
+| `SNOWFLAKE_PASSWORD` | given by instructor |
+| `SNOWFLAKE_WAREHOUSE` | your own warehouse (e.g., `EAGLE_QUERY_WH`) |
+| `NREL_API_KEY` | from <https://developer.nrel.gov/signup/> |
+| `CENSUS_API_KEY` | from <https://api.census.gov/data/key_signup.html> |
 
 > **Never commit `.env`.** It's already in `.gitignore`. Each teammate has their own.
 
@@ -223,13 +221,17 @@ EV-pipeline/
 
 ## Snowflake schema layout
 
+All four teammates read/write to the **same** three schemas in `USER_DB_BADGER`:
+
 | Schema | Purpose | Populated by |
 |---|---|---|
 | `RAW` | Untransformed JSON / CSV from APIs | Airflow ingestion DAGs |
 | `CURATED` | Cleaned, standardized, joined | dbt `models/staging` + `models/curated` |
 | `ANALYTICS` | Final aggregates for dashboards | dbt `models/analytics` |
 
-During dev each teammate uses their own schema (`SNOWFLAKE_SCHEMA=dev_<name>` in `.env`) so models don't collide. The shared `analytics` schema is reserved for the final demo build.
+These were created once via `snowflake/setup.sql` (run by Pragya in the Snowflake worksheet UI). You don't need to re-run it.
+
+> **Heads up on collaboration:** since we share schemas, two people running `dbt run` simultaneously can overwrite the same table mid-build. Easy mitigation — give a heads-up in chat ("running dbt now, hold off ~5 min") before kicking off a build.
 
 ---
 
@@ -284,4 +286,4 @@ dbt docs generate && dbt docs serve   # browse model docs
 - Branch from `main`: `git checkout -b <name>/<feature>` (e.g. `pragya/nrel-ingestion-dag`).
 - Open a PR for review before merging.
 - If you add a new env var, update **`.env.example`** so others know to set it.
-- Use a personal `SNOWFLAKE_SCHEMA` (`dev_<name>`) so dbt builds don't overwrite teammates' work.
+- Coordinate `dbt run` timing in the team chat to avoid two people overwriting each other's tables.
