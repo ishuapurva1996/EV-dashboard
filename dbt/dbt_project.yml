@@ -32,5 +32,17 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   ev_pipeline:
     # Config indicated by + and applies to all files under models/example/
-    example:
+    staging:
       +materialized: view
+      +schema: STAGING_EV
+    curated:
+      +materialized: table
+      +schema: CURATED_EV
+    analytics:
+      +materialized: table
+      +schema: ANALYTICS_EV
+
+seeds:
+  ev_pipeline:
+    afdc_registrations:
+      +schema: RAW_EV
