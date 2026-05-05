@@ -47,7 +47,7 @@ seeds:
     afdc_registrations:
       +schema: RAW_EV
     dim_states:
-      +schema: RAW_EV
+      +schema: CURATED_EV
       +column_types:
         state_fips: varchar(2)
         state_name: varchar

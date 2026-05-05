@@ -1,0 +1,209 @@
+version: 2
+
+models:
+
+  - name: fct_stations_by_state
+    description: "One row per US state — aggregated NREL charging-station counts and total port capacity by tier. Grain: state. Source: stg_nrel_stations."
+    columns:
+      - name: state_fips
+        description: "Two-character FIPS state code. PK and FK to dim_states."
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        description: "USPS 2-letter state abbreviation."
+        tests:
+          - not_null
+          - unique
+      - name: state_name
+        description: "Full state name."
+        tests:
+          - not_null
+          - unique
+      - name: total_stations
+        description: "Total number of NREL stations in the state, all statuses included."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: stations_open
+        description: "Stations with status_code = 'E' (operational and available)."
+        tests:
+          - not_null
+      - name: stations_planned
+        description: "Stations with status_code = 'P' (planned, not yet open)."
+        tests:
+          - not_null
+      - name: stations_temporary
+        description: "Stations with status_code = 'T' (temporarily unavailable)."
+        tests:
+          - not_null
+      - name: total_level1_ports
+        description: "Sum of Level 1 (120V) ports across all stations in the state."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_level2_ports
+        description: "Sum of Level 2 (240V) ports across all stations in the state."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_dcfast_ports
+        description: "Sum of DC fast-charging ports across all stations in the state."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_ports
+        description: "Sum of all port tiers (level1 + level2 + dcfast) across the state."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= total_level1_ports + total_level2_ports + total_dcfast_ports"
+      - name: distinct_networks
+        description: "Number of distinct charging-network operators serving the state."
+        tests:
+          - not_null
+      - name: earliest_station_opened
+        description: "Open date of the oldest station in the state."
+      - name: latest_station_opened
+        description: "Open date of the most recent station in the state."
+
+  - name: fct_ev_adoption_by_state_year
+    description: "One row per state per year — BEV/PHEV registration counts plus derived adoption metrics (total EVs, BEV share, year-over-year growth). Grain: (state, year). Source: stg_afdc_registrations."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_fips
+            - registration_year
+    columns:
+      - name: state_fips
+        description: "Two-character FIPS state code. FK to dim_states."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        description: "USPS 2-letter state abbreviation."
+        tests:
+          - not_null
+      - name: state_name
+        description: "Full state name."
+        tests:
+          - not_null
+      - name: registration_year
+        description: "Calendar year of the registration count."
+        tests:
+          - not_null
+      - name: bev_count
+        description: "Battery Electric Vehicle registrations in the state for the year."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: phev_count
+        description: "Plug-in Hybrid Electric Vehicle registrations in the state for the year."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: total_ev_count
+        description: "Sum of BEV + PHEV registrations. Should always equal bev_count + phev_count."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= bev_count + phev_count"
+      - name: bev_share
+        description: "Fraction of state's EVs that are pure battery electric (bev_count / total_ev_count). Range [0, 1]. NULL only if total_ev_count = 0."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 1"
+      - name: phev_share
+        description: "Fraction of state's EVs that are plug-in hybrid. Range [0, 1]."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 1"
+      - name: prior_year_total
+        description: "total_ev_count from the previous year for the same state. NULL for the earliest year per state (no prior year exists)."
+      - name: yoy_growth_pct
+        description: "Year-over-year percent change in total_ev_count vs prior year. NULL for the earliest year per state. Can be negative if registrations decline."
+
+  - name: fct_stations_by_state_year
+    description: "One row per state per year, 1995–current. Combines flow (new_* = stations opened *in* year) and stock (cumulative_* = total operational *as of end of* year) metrics. Excludes NREL rows with NULL open_date and status_code = 'P' (planned). Generates a complete state×year grid so years with zero new stations still appear (required for time-series and forecasting models)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_fips
+            - vintage_year
+    columns:
+      - name: state_fips
+        description: "Two-character FIPS state code. FK to dim_states."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        tests:
+          - not_null
+      - name: state_name
+        tests:
+          - not_null
+      - name: vintage_year
+        description: "Calendar year. For new_* columns: stations opened in this year. For cumulative_* columns: total operational as of end of this year."
+        tests:
+          - not_null
+      - name: new_stations
+        description: "Count of stations whose open_date falls in this calendar year."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: new_level1_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: new_level2_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: new_dcfast_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: new_total_ports
+        description: "Sum of new_level1_ports + new_level2_ports + new_dcfast_ports."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= new_level1_ports + new_level2_ports + new_dcfast_ports"
+      - name: cumulative_stations
+        description: "Total stations operational in the state by end of vintage_year (running sum of new_stations)."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= new_stations"
+      - name: cumulative_level1_ports
+        tests:
+          - not_null
+      - name: cumulative_level2_ports
+        tests:
+          - not_null
+      - name: cumulative_dcfast_ports
+        tests:
+          - not_null
+      - name: cumulative_total_ports
+        description: "Total port capacity in the state by end of vintage_year. Should equal cumulative_level1_ports + cumulative_level2_ports + cumulative_dcfast_ports."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= cumulative_level1_ports + cumulative_level2_ports + cumulative_dcfast_ports"

@@ -146,7 +146,58 @@ The first end-to-end dbt-only layer. Four components: source declarations, a sep
 - `dbt build --select staging --profiles-dir .` runs seeds + models + tests in dependency order. One command, full pipeline validation.
 - The `--profiles-dir .` flag overrides `DBT_PROFILES_DIR=/opt/airflow/dbt` from `.env` (which is the correct container path but not the local Mac path).
 
-### 10. GitHub & collaboration
+### 10. Curated layer — conformed dimension + three fact tables
+
+End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables materialized, 41 curated-layer tests passing.
+
+#### 10.1 Promoted `dim_states` from RAW_EV → CURATED_EV
+- Changed `+schema:` for the dim_states seed in `dbt_project.yml`. Seed CSV still lives at `dbt/seeds/dim_states.csv`; only the destination schema moved.
+- Rationale: dim_states is hand-curated reference data, not external feed output. CURATED_EV is its semantically correct home.
+- Old `RAW_EV.DIM_STATES` dropped manually with `DROP TABLE IF EXISTS`.
+- **Lazy-resolution gotcha caught:** Snowflake views resolve table references at query time, not creation time. Existing staging views were compiled to read `RAW_EV.DIM_STATES`; after the drop, querying any staging view failed with "object does not exist" until we ran `dbt run --select staging` to recompile against the new location. Lesson: after relocating any upstream table, rebuild downstream views before assuming the pipeline still works.
+
+#### 10.2 `fct_stations_by_state` — current snapshot
+- Grain: one row per US state (52 rows: 50 + DC + PR).
+- Source: `stg_nrel_stations`. No filter on `open_date` — includes the ~5% of stations with NULL open dates (we want the most accurate "what exists today" count).
+- Aggregations: total stations, status breakdown (open/planned/temporary), per-tier port counts (L1/L2/DCFast), grand-total ports, distinct network operators, earliest/latest open dates.
+- Materialized as a table (per `dbt_project.yml` curated config).
+- **Defensive arithmetic on `total_ports`:** `SUM(coalesce(level1, 0) + coalesce(level2, 0) + coalesce(dcfast, 0))`. Without COALESCE, any NULL tier inside the addition would propagate (NULL + 6 = NULL) and corrupt the sum. SUM-ignoring-nulls only protects you when each tier is summed independently — not inside an arithmetic expression.
+
+#### 10.3 `fct_ev_adoption_by_state_year` — adoption time-series
+- Grain: one row per state per year (255 rows: 51 states × 5 AFDC years 2020–2024).
+- Source: `stg_afdc_registrations`.
+- Derived metrics: `total_ev_count = bev + phev`, `bev_share` and `phev_share` (forced float division via `* 1.0`), `prior_year_total` (via LAG), `yoy_growth_pct = (current - prior) / prior * 100`.
+- **Window function pattern:** `LAG(total_ev_count) OVER (PARTITION BY state_fips ORDER BY registration_year)`. Partition resets the running view at each new state; ORDER BY defines what "previous row" means within the partition. Without partitioning, NY's 2021 LAG would pull CA's 2020 value.
+- NULL handling: `bev_share`/`phev_share` are NULL when `total_ev_count = 0` (defensive guard; doesn't actually trigger for AFDC data); `prior_year_total` and `yoy_growth_pct` are NULL for the earliest year per state (no prior to compare).
+
+#### 10.4 `fct_stations_by_state_year` — infrastructure time-series
+- Grain: one row per state per year, 1995–current year (1,664 rows: 52 × 32).
+- Source: `stg_nrel_stations` filtered to `open_date IS NOT NULL AND status_code IN ('E', 'T')`. Drops the ~5% of undated stations (can't place on timeline) and excludes Planned status (not yet operational).
+- **Two metric families per row:**
+  - *Flow* (`new_*`): stations and ports that opened *in* that year. `GROUP BY year(open_date)` produces sparse per-year aggregates.
+  - *Stock* (`cumulative_*`): running sums via `SUM(...) OVER (PARTITION BY state_fips ORDER BY vintage_year)` — the default frame `RANGE UNBOUNDED PRECEDING TO CURRENT ROW` makes this a true running cumulative.
+- **Complete (state × year) grid construction** — the standard pattern for any time-series fact:
+  1. `year_spine` CTE: 1995 → current year using `TABLE(GENERATOR(rowcount => 100))` + `SEQ4()` + `WHERE vintage_year <= year(current_date())`. Generator margin (100 vs ~32 needed) avoids annual maintenance.
+  2. `state_year_grid` = `dim_states CROSS JOIN year_spine` → dense 52 × 32 = 1,664-row frame
+  3. `LEFT JOIN` sparse `new_per_year` aggregates onto the dense grid; `COALESCE(..., 0)` zero-fills gaps
+  4. Window function computes cumulative SUMs across the now-contiguous time series
+- **Why the grid matters:** forecasting models require contiguous time. Without it, Wyoming's 2019 row (no new stations) would be missing entirely → charts gap → LAG/window functions either error or interpolate falsely.
+- **Snowflake gotcha caught:** initial year_spine used `QUALIFY vintage_year <= year(current_date())`. Snowflake rejects QUALIFY without a window function. Refactored to wrap in a subquery and use `WHERE`.
+
+#### 10.5 Curated schema tests — `dbt/models/curated/schema.yml`
+- 41 tests across the three facts. Coverage:
+  - `unique` + `not_null` on PKs (state_fips for snapshot facts, composite for time-series)
+  - `relationships` from every fact's `state_fips` → `dim_states.state_fips` — proves no orphan keys (the conformed dimension contract)
+  - `dbt_utils.unique_combination_of_columns` for composite PKs `(state_fips, year)`
+  - `dbt_utils.expression_is_true` for arithmetic consistency:
+    - `total_ports = total_level1_ports + total_level2_ports + total_dcfast_ports`
+    - `total_ev_count = bev_count + phev_count`
+    - `cumulative_total_ports = cumulative_level1 + cumulative_level2 + cumulative_dcfast`
+    - `cumulative_stations >= new_stations` (monotonic running sum)
+    - `bev_share between 0 and 1`, `phev_share between 0 and 1`
+    - All count columns `>= 0`
+
+### 11. GitHub & collaboration
 - Initialized git, sanity-checked `.env` exclusion, made first commit, pushed to public repo.
 - README covers prerequisites, 6-step first-time setup, daily workflow, troubleshooting matrix, and branching conventions.
 - `.env.example` pre-fills shared values and leaves only personal fields blank.
@@ -156,7 +207,8 @@ The first end-to-end dbt-only layer. Four components: source declarations, a sep
   - `ae3dce3` Rename schemas to *_EV; add NREL ingest DAG + skills.md
   - `e25d681` Add Census ACS5 population ingest; rename NREL DAG for consistency
   - `c30fa9c` Add AFDC seed, schema-routing macro, dbt model scaffolding
-  - (next commit) Build dbt staging layer: sources, schema tests, dim_states seed, three stg_ models
+  - `ec83940` Build dbt staging layer: sources, schema tests, dim_states seed, three stg_ models
+  - (next commit) Build curated layer: promote dim_states + 3 fact tables + 41 tests
 
 ---
 
@@ -192,6 +244,15 @@ The first end-to-end dbt-only layer. Four components: source declarations, a sep
 - **Defensive normalization at the staging boundary** (`UPPER()` on third-party string keys) to absorb upstream casing variance.
 - `dbt build --select <selector>` for one-shot run+test in dependency order; `--profiles-dir .` to override container env vars on the local Mac.
 - Verifying connectivity with `dbt debug`; loading data with `dbt seed --select <name>`.
+- **Star-schema fact tables** — current-snapshot fact (`fct_stations_by_state`), per-period flow + stock fact (`fct_stations_by_state_year`, `fct_ev_adoption_by_state_year`). Two facts for the same entity coexist when they answer different questions ("what exists now?" vs "how did it change?").
+- **`relationships` tests** as the conformed-dimension contract — every fact's foreign key must resolve to a row in `dim_states`.
+- **Window functions for time-series**:
+  - `LAG()` for prior-period lookups (year-over-year growth)
+  - `SUM(...) OVER (PARTITION BY ... ORDER BY ...)` for running cumulative sums
+  - Default frame `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` produces true cumulative behavior
+- **Date-spine pattern** — `TABLE(GENERATOR(rowcount => N))` + `SEQ4()` to build a contiguous year/date series, then `CROSS JOIN dim_states` for a complete grid that fills LEFT-JOIN gaps with `COALESCE(..., 0)`. Required for any forecasting model that assumes contiguous time.
+- **Defensive `COALESCE` inside arithmetic** — `coalesce(a, 0) + coalesce(b, 0)` prevents one NULL from poisoning the whole expression. SUM-ignoring-nulls only protects per-column aggregation, not in-expression addition.
+- **Monotonic-cumulative consistency tests** (`cumulative_X >= new_X`) and **per-tier sum tests** (`total = level1 + level2 + level3`) — catch silent bugs in window-function arithmetic.
 
 ### Snowflake
 - Schema design across four logical tiers in a single shared database.
@@ -234,6 +295,11 @@ The first end-to-end dbt-only layer. Four components: source declarations, a sep
 - **Why `UPPER(s.state)` on NREL?** Snowflake string comparisons are case-sensitive. NREL *should* always send uppercase 2-letter codes, but it's a third-party API we don't control. `UPPER()` normalizes at the join boundary so a future bad batch (`'ca'` instead of `'CA'`) doesn't silently drop rows from the join.
 - **Why preserve leading zeros on `state_fips`?** FIPS codes are zero-padded *strings*, not numbers. Census transmits them as `'01'`, `'06'`, etc. If `dim_states.state_fips` becomes the integer `1`, the join `'01' = 1` fails. The `+column_types: state_fips: varchar(2)` config in `dbt_project.yml` forces dbt to load the seed column as VARCHAR.
 - **Why `dbt seed` for `dim_states` rather than a hand-written SQL model with UNION ALLs?** 52 rows of static reference data, version-controlled via PR review. A SQL `UNION ALL` would be 52 lines of repetition with no upside. Same reasoning as AFDC: dbt seed is purpose-built for slow-moving small reference data.
+- **Why two station fact tables (`fct_stations_by_state` snapshot and `fct_stations_by_state_year` time-series)?** They answer different questions and have different filtering needs. The snapshot includes ALL stations (the most accurate "what exists today" count); the time-series excludes ~5% of stations with NULL `open_date` (can't place undated rows on a timeline). Forcing one table to do both jobs would mean either undercounting the current state or fabricating fake open dates. Both tables coexist; downstream queries pick the one that fits.
+- **Why filter NULL `open_date` in the time-series fact instead of including them?** Two bad alternatives: include in latest year (creates a false 5% spike on the last data point that corrupts forecasts), or distribute across all years (fabricates history that didn't happen). Dropping them is the only honest choice. The 5% gap is documented in the model description and bounded by `fct_stations_by_state` (which keeps them).
+- **Why a complete (state × year) grid via `dim_states CROSS JOIN year_spine` instead of just aggregating where data exists?** Sparse aggregations break time-series analysis. If Wyoming had no station openings in 2019, a `GROUP BY year` produces no row → cumulative SUM has nothing to anchor → forecasting models error or interpolate wildly. The grid forces all 32 years to exist for every state; LEFT JOIN + COALESCE zero-fills empty cells. ~1,600 rows, trivially small, eliminates an entire class of downstream bugs.
+- **Why include both flow (`new_*`) and stock (`cumulative_*`) columns in the same time-series fact?** Both are needed for analytics — flow for "growth rate per year," stock for "stations per 100k people in 2022." Computing one from the other on demand requires a window function in every query. Materializing both pays the compute cost once at build time and serves all reads instantly. Fact tables are caches of pre-computed analytics — that's their job.
+- **Why promote `dim_states` from RAW_EV to CURATED_EV (and not leave it where the seed initially landed)?** Conformed dimensions are *derived* artifacts even when the source is a hand-curated CSV — they encode the business decision of "which states do we recognize?" That decision belongs in the curated tier alongside facts, not in the raw tier where external feeds land. Caused a one-time stale-view bug (Snowflake views resolve table references lazily) — fixed by re-running staging models after the move.
 
 ---
 
@@ -247,7 +313,7 @@ The first end-to-end dbt-only layer. Four components: source declarations, a sep
 | 4 | dbt sources YAML (`models/staging/_sources.yml`) declaring the 3 raw tables | ✅ Done |
 | 5 | `dim_states` dbt seed — FIPS ↔ state name ↔ 2-letter abbreviation lookup | ✅ Done |
 | 6 | dbt staging models (`stg_nrel_stations`, `stg_census_population`, `stg_afdc_registrations`) | ✅ Done |
-| 7 | dbt curated layer (deduplicated, normalized fact + dimension tables) | Not started |
+| 7 | dbt curated layer (deduplicated, normalized fact + dimension tables) | ✅ Done |
 | 8 | dbt analytics layer (per-state station density, top-20 cities, gap ranking, stations-per-100k) | Not started |
 | 9 | 12-month time-series forecast (EV adoption + infrastructure expansion) | Not started |
 | 10 | Preset.io dashboard | Not started |
