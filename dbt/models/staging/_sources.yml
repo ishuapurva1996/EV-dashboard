@@ -1,0 +1,87 @@
+version: 2
+
+sources:
+  - name: raw_ev
+    description: "Raw landing zone for the three EV-pipeline source feeds: NREL stations (daily API), Census ACS5 population (annual API), and AFDC EV registrations (annual dbt seed)."
+    schema: RAW_EV
+
+    tables:
+
+      - name: nrel_stations
+        identifier: NREL_STATIONS
+        description: "NREL Alternative Fuels Data Center — public US EV charging stations. Refreshed daily by the `nrel_stations_data_ingest` Airflow DAG using a high-water-mark gate against the `/last-updated.json` endpoint. Full-refresh (TRUNCATE+INSERT) when the upstream timestamp advances."
+        loaded_at_field: updated_at
+        freshness:
+          warn_after: { count: 2, period: day }
+          error_after: { count: 7, period: day }
+        columns:
+          - name: id
+            description: "NREL-assigned station identifier. Stable primary key across pulls."
+          - name: station_name
+            description: "Public-facing station name (e.g., 'Tesla Supercharger - San Mateo')."
+          - name: updated_at
+            description: "Timestamp NREL last modified the record. Drives source freshness checks."
+          - name: date_last_confirmed
+            description: "Date the station's operational status was last verified by NREL."
+          - name: latitude
+            description: "WGS84 latitude in decimal degrees."
+          - name: longitude
+            description: "WGS84 longitude in decimal degrees."
+          - name: street_address
+          - name: city
+          - name: state
+            description: "Two-letter USPS state abbreviation. Joins to `dim_states.state_abbr`."
+          - name: zip
+            description: "5- or 9-digit ZIP code as a string (preserves leading zeros)."
+          - name: ev_level1_evse_num
+            description: "Count of Level 1 (120V) EVSE ports at the station."
+          - name: ev_level2_evse_num
+            description: "Count of Level 2 (240V) EVSE ports at the station."
+          - name: ev_dc_fast_num
+            description: "Count of DC fast-charging ports at the station."
+          - name: ev_connector_types
+            description: "Comma-separated list of connector types (e.g., 'J1772,CHADEMO,TESLA')."
+          - name: status_code
+            description: "One-letter operational status: E=Available, P=Planned, T=Temporarily unavailable."
+          - name: access_code
+            description: "Public/private access designation. Always 'public' for this feed (filtered at ingest)."
+          - name: ev_network
+            description: "Charging network operator (e.g., 'Tesla', 'ChargePoint Network', 'Non-Networked')."
+          - name: ev_pricing
+            description: "Free-text pricing description as published by the station operator."
+          - name: facility_type
+            description: "Hosting facility category (e.g., 'HOTEL', 'GROCERY', 'PARKING_GARAGE')."
+          - name: open_date
+            description: "Date the station opened for public use."
+
+      - name: census_population
+        identifier: CENSUS_POPULATION
+        description: "US Census Bureau ACS 5-Year Estimates — total population by state. One row per state/territory per ACS vintage. Refreshed annually by the `census_population_data_ingest` Airflow DAG."
+        loaded_at_field: loaded_at
+        freshness:
+          warn_after: { count: 400, period: day }
+          error_after: { count: 730, period: day }
+        columns:
+          - name: state_fips
+            description: "Two-character FIPS state code (zero-padded, e.g., '01' for Alabama, '11' for DC, '72' for Puerto Rico). Joins to `dim_states.state_fips`."
+          - name: state_name
+            description: "Full state/territory name as published by Census."
+          - name: population
+            description: "Total population estimate from ACS5 variable B01003_001E."
+          - name: acs_year
+            description: "ACS5 vintage year (the latest year in the 5-year window)."
+          - name: loaded_at
+            description: "UTC timestamp the row was loaded into Snowflake."
+
+      - name: afdc_registrations
+        identifier: AFDC_REGISTRATIONS
+        description: "DOE Alternative Fuels Data Center — state-level EV registration counts (BEV + PHEV) by year. Manually curated dbt seed; HEV intentionally excluded (does not use charging stations). Long format: one row per state per year."
+        columns:
+          - name: state_name
+            description: "Full state name. Joins to `dim_states.state_name`."
+          - name: registration_year
+            description: "Calendar year of the registration count."
+          - name: bev_count
+            description: "Battery Electric Vehicle registrations in the state for the given year."
+          - name: phev_count
+            description: "Plug-in Hybrid Electric Vehicle registrations in the state for the given year."

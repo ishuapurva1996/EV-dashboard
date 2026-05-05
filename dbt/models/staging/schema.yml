@@ -1,0 +1,88 @@
+version: 2
+
+# All data-quality tests for the staging layer live here, separated from
+# source declarations in `_sources.yml` for readability.
+#
+# These tests run against the staging views (which are 1:1 with raw),
+# so they enforce the same contracts the source tables must honor.
+# Test against staging — not raw — so transformation logic is also covered.
+
+models:
+
+  - name: stg_nrel_stations
+    description: "One row per public US EV charging station from NREL. Casts and renames raw fields; no row-level filtering."
+    columns:
+      - name: station_id
+        description: "NREL-assigned station identifier. Renamed from `id`."
+        tests:
+          - not_null
+          - unique
+      - name: updated_at
+        description: "Timestamp NREL last modified the record."
+        tests:
+          - not_null
+      - name: latitude
+        tests:
+          - not_null
+      - name: longitude
+        tests:
+          - not_null
+      - name: state_abbr
+        description: "Two-letter USPS state abbreviation. FK to `dim_states.state_abbr`."
+        tests:
+          - not_null
+      - name: status_code
+        description: "Operational status: E=Available, P=Planned, T=Temporarily unavailable."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['E', 'P', 'T']
+
+  - name: stg_census_population
+    description: "One row per US state/territory with the latest ACS5 population estimate."
+    columns:
+      - name: state_fips
+        description: "Two-character FIPS state code. PK + FK to `dim_states.state_fips`."
+        tests:
+          - not_null
+          - unique
+      - name: state_name
+        tests:
+          - not_null
+      - name: population
+        description: "Total population (ACS5 B01003_001E). Must be positive."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: acs_year
+        tests:
+          - not_null
+
+  - name: stg_afdc_registrations
+    description: "One row per state per year with BEV and PHEV registration counts. Long format, joined to `dim_states` to attach FIPS + abbreviation."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_name
+            - registration_year
+    columns:
+      - name: state_name
+        description: "Full state name. FK to `dim_states.state_name`."
+        tests:
+          - not_null
+      - name: registration_year
+        tests:
+          - not_null
+      - name: bev_count
+        description: "Battery Electric Vehicle registrations. Non-negative."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: phev_count
+        description: "Plug-in Hybrid EV registrations. Non-negative."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"

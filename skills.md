@@ -107,16 +107,56 @@ DATA 226 group project (Group 5). End-to-end data pipeline analyzing US EV charg
   ```
 - Default `models/example/` folder (from `dbt init`) deleted; replaced with the three-folder layered structure.
 
-### 9. GitHub & collaboration
+### 9. dbt sources, schema tests, and staging models
+
+The first end-to-end dbt-only layer. Four components: source declarations, a separated test file, the `dim_states` conformed dimension, and the three staging models that produce key-conformed views.
+
+#### 9.1 Source declarations — `dbt/models/staging/_sources.yml`
+- Declares all three raw tables under `source: raw_ev` so models can reference them via `{{ source('raw_ev', 'nrel_stations') }}` instead of hardcoding `RAW_EV.NREL_STATIONS`. Enables lineage tracking, refactor safety, and source freshness checks.
+- `identifier:` field on each table makes the dbt-alias → Snowflake-table mapping explicit (e.g., `nrel_stations` → `NREL_STATIONS`).
+- Source `freshness:` blocks: NREL warns at 2 days / errors at 7 days; Census warns at 400 days / errors at 730 days (annual cadence). AFDC has no freshness check (it's a static seed).
+- Full column-level descriptions on every table for auto-generated docs (`dbt docs generate`).
+- All data-quality tests intentionally moved to a separate `schema.yml` for readability.
+
+#### 9.2 Schema tests — `dbt/models/staging/schema.yml`
+- All staging-layer tests in one file, attached to the staging *models* (not the raw sources). Same coverage as source tests would provide, since staging views are 1:1 with raw.
+- Test inventory:
+  - `stg_nrel_stations`: `not_null` + `unique` on `station_id`; `not_null` on `updated_at`/`latitude`/`longitude`/`state_abbr`; `accepted_values` on `status_code` (E/P/T)
+  - `stg_census_population`: `not_null` + `unique` on `state_fips`; `not_null` on `state_name`/`acs_year`; `population > 0`
+  - `stg_afdc_registrations`: composite-key uniqueness on `(state_name, registration_year)`; `not_null` on all four columns; `bev_count >= 0`, `phev_count >= 0`
+- Uses `dbt_utils.expression_is_true` and `dbt_utils.unique_combination_of_columns` — required adding `dbt-labs/dbt_utils` to `dbt/packages.yml` and running `dbt deps`.
+
+#### 9.3 `dim_states` — the conformed dimension
+- `dbt/seeds/dim_states.csv` — 52 rows: 50 states + DC (FIPS `11`) + Puerto Rico (FIPS `72`).
+- Three columns: `state_fips`, `state_name`, `state_abbr`. Each row is the same state expressed in all three "languages."
+- Solves the three-way key mismatch: Census uses FIPS (`'06'`), NREL uses 2-letter abbreviations (`'CA'`), AFDC uses full names (`'California'`). Without `dim_states`, the three feeds cannot be joined.
+- `+column_types: state_fips: varchar(2)` in `dbt_project.yml` is critical — without it, dbt's seed loader infers `state_fips` as NUMBER and silently strips the leading zero from `'01'`, `'06'`, etc., breaking the join to Census which transmits FIPS as zero-padded strings.
+- Loaded via `dbt seed --select dim_states` → lands at `RAW_EV.DIM_STATES`.
+
+#### 9.4 Three staging models — `dbt/models/staging/`
+- `stg_census_population.sql` — joins on `state_fips`, gains `state_abbr` + `state_name`.
+- `stg_nrel_stations.sql` — `UPPER(state)` defensively, joins on `state_abbr`, gains `state_fips` + `state_name`. Renames `id` → `station_id` for consistent FK naming downstream.
+- `stg_afdc_registrations.sql` — joins on `state_name`, gains `state_fips` + `state_abbr`.
+- All three follow the same CTE pattern: `source → states → renamed → select`.
+- Materialized as views (per `dbt_project.yml`) — zero storage cost, always reflect latest raw data.
+- **Key conformance**: after staging, every model exposes the *same three state keys* (`state_fips`, `state_abbr`, `state_name`). Downstream curated/analytics models can join on whichever key is most convenient.
+- **INNER JOIN, not LEFT JOIN**: filters territory rows (Guam, USVI, AS, MP) at the staging boundary. The contract is "this view contains only US states + DC + PR." Anything outside that scope is dropped here, not silently propagated to analytics where it would skew per-state aggregates.
+
+#### 9.5 Build + validate
+- `dbt build --select staging --profiles-dir .` runs seeds + models + tests in dependency order. One command, full pipeline validation.
+- The `--profiles-dir .` flag overrides `DBT_PROFILES_DIR=/opt/airflow/dbt` from `.env` (which is the correct container path but not the local Mac path).
+
+### 10. GitHub & collaboration
 - Initialized git, sanity-checked `.env` exclusion, made first commit, pushed to public repo.
 - README covers prerequisites, 6-step first-time setup, daily workflow, troubleshooting matrix, and branching conventions.
 - `.env.example` pre-fills shared values and leaves only personal fields blank.
 - WhatsApp onboarding message drafted for teammates.
-- Two clean commits to date:
+- Clean commit history to date:
   - `b77001a` Switch to shared-DB collaboration model
   - `ae3dce3` Rename schemas to *_EV; add NREL ingest DAG + skills.md
   - `e25d681` Add Census ACS5 population ingest; rename NREL DAG for consistency
-- Pending uncommitted work: AFDC seed CSV, generate_schema_name macro, dbt_project.yml updates, model folder scaffolding, STAGING_EV in setup.sql.
+  - `c30fa9c` Add AFDC seed, schema-routing macro, dbt model scaffolding
+  - (next commit) Build dbt staging layer: sources, schema tests, dim_states seed, three stg_ models
 
 ---
 
@@ -141,6 +181,16 @@ DATA 226 group project (Group 5). End-to-end data pipeline analyzing US EV charg
 - Env-var-driven `profiles.yml` so the same profile works locally and inside Docker without leaking creds.
 - **Custom `generate_schema_name` macro** to override dbt's default `<target>_<custom>` concatenation — required for clean schema names in shared training environments.
 - **dbt seeds** for slow-changing reference data: schema routing via `+schema:`, explicit column types via `+column_types`, type inference fallback for clean CSVs.
+- **`{{ source(...) }}` references** instead of hardcoded `schema.table` names — enables lineage tracking, source freshness checks, and one-line refactor when raw locations change.
+- **`identifier:`** on source tables to make the dbt-alias → Snowflake-table mapping explicit and protect against case-sensitivity surprises.
+- **Source freshness** with warn/error windows tied to source `loaded_at_field` timestamps.
+- **Splitting source declarations from tests** — `_sources.yml` for what exists, `schema.yml` for what must be true.
+- **`dbt_utils` package** for tests beyond dbt-core (`expression_is_true`, `unique_combination_of_columns`).
+- **Conformed dimension pattern** — `dim_states` as a Rosetta Stone joining sources that use different keys (FIPS vs abbreviation vs full name).
+- **`+column_types` on seeds** to preserve string formatting (zero-padded FIPS codes) that dbt's type inference would otherwise destroy.
+- **CTE pattern for staging models** — `source → ref → renamed → select` for readability and easy debugging.
+- **Defensive normalization at the staging boundary** (`UPPER()` on third-party string keys) to absorb upstream casing variance.
+- `dbt build --select <selector>` for one-shot run+test in dependency order; `--profiles-dir .` to override container env vars on the local Mac.
 - Verifying connectivity with `dbt debug`; loading data with `dbt seed --select <name>`.
 
 ### Snowflake
@@ -179,6 +229,11 @@ DATA 226 group project (Group 5). End-to-end data pipeline analyzing US EV charg
 - **Why a custom `generate_schema_name` macro?** dbt's default behavior concatenates `<target.schema>_<custom>`, which would map our intended `RAW_EV` to `ANALYTICS_EV_RAW_EV`. Standard dbt override pattern; six lines of Jinja eliminate the schema-sprawl problem.
 - **Why the `_EV` suffix on every schema (RAW_EV, STAGING_EV, CURATED_EV, ANALYTICS_EV)?** Visual symmetry when scanning Snowflake's schema list, and clear separation from any non-EV schemas teammates might use in the same shared training database.
 - **Why include Puerto Rico (FIPS 72) in raw, but plan to filter in analytics?** Census ACS5 returns it; NREL has stations there; AFDC excludes it. Keeping it in RAW preserves source fidelity; filtering in the analytics layer keeps "US states" comparisons clean while preserving the option to add territories later.
+- **Why split `_sources.yml` and `schema.yml`?** Source declarations are reference material (what columns exist, what they mean); tests are operational contracts (what must be true). Splitting keeps each file scannable for its own purpose. dbt requires source-column tests to live inside the source declaration, so we instead attach the tests to the staging models — same coverage since staging is 1:1 with raw.
+- **Why INNER JOIN to `dim_states` instead of LEFT JOIN at staging?** INNER JOIN treats the `dim_states` membership as a filter: any row whose state isn't in our recognized set (50 + DC + PR) gets dropped at the staging boundary. The contract becomes explicit ("this view is US states only"), unrecognized states surface immediately rather than skewing downstream aggregates, and adding a territory means one new line in `dim_states.csv` — no model changes.
+- **Why `UPPER(s.state)` on NREL?** Snowflake string comparisons are case-sensitive. NREL *should* always send uppercase 2-letter codes, but it's a third-party API we don't control. `UPPER()` normalizes at the join boundary so a future bad batch (`'ca'` instead of `'CA'`) doesn't silently drop rows from the join.
+- **Why preserve leading zeros on `state_fips`?** FIPS codes are zero-padded *strings*, not numbers. Census transmits them as `'01'`, `'06'`, etc. If `dim_states.state_fips` becomes the integer `1`, the join `'01' = 1` fails. The `+column_types: state_fips: varchar(2)` config in `dbt_project.yml` forces dbt to load the seed column as VARCHAR.
+- **Why `dbt seed` for `dim_states` rather than a hand-written SQL model with UNION ALLs?** 52 rows of static reference data, version-controlled via PR review. A SQL `UNION ALL` would be 52 lines of repetition with no upside. Same reasoning as AFDC: dbt seed is purpose-built for slow-moving small reference data.
 
 ---
 
@@ -189,9 +244,9 @@ DATA 226 group project (Group 5). End-to-end data pipeline analyzing US EV charg
 | 1 | NREL Alternative Fuels Stations ingest DAG | ✅ Done |
 | 2 | US Census ACS5 population ingest DAG | ✅ Done |
 | 3 | DOE/AFDC EV registration ingest (dbt seed) | ✅ Done |
-| 4 | dbt sources YAML (`models/staging/_sources.yml`) declaring the 3 raw tables | Not started |
-| 5 | `dim_states` dbt model — FIPS ↔ state name ↔ 2-letter abbreviation lookup | Not started |
-| 6 | dbt staging models (`stg_nrel_stations`, `stg_census_population`, `stg_afdc_registrations`) | Not started |
+| 4 | dbt sources YAML (`models/staging/_sources.yml`) declaring the 3 raw tables | ✅ Done |
+| 5 | `dim_states` dbt seed — FIPS ↔ state name ↔ 2-letter abbreviation lookup | ✅ Done |
+| 6 | dbt staging models (`stg_nrel_stations`, `stg_census_population`, `stg_afdc_registrations`) | ✅ Done |
 | 7 | dbt curated layer (deduplicated, normalized fact + dimension tables) | Not started |
 | 8 | dbt analytics layer (per-state station density, top-20 cities, gap ranking, stations-per-100k) | Not started |
 | 9 | 12-month time-series forecast (EV adoption + infrastructure expansion) | Not started |
