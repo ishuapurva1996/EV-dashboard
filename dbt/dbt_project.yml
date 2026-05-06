@@ -52,3 +52,4 @@ seeds:
         state_fips: varchar(2)
         state_name: varchar
         state_abbr: varchar(2)
+        census_region: varchar

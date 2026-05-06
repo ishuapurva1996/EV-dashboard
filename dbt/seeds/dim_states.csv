@@ -1,53 +1,53 @@
-state_fips,state_name,state_abbr
-01,Alabama,AL
-02,Alaska,AK
-04,Arizona,AZ
-05,Arkansas,AR
-06,California,CA
-08,Colorado,CO
-09,Connecticut,CT
-10,Delaware,DE
-11,District of Columbia,DC
-12,Florida,FL
-13,Georgia,GA
-15,Hawaii,HI
-16,Idaho,ID
-17,Illinois,IL
-18,Indiana,IN
-19,Iowa,IA
-20,Kansas,KS
-21,Kentucky,KY
-22,Louisiana,LA
-23,Maine,ME
-24,Maryland,MD
-25,Massachusetts,MA
-26,Michigan,MI
-27,Minnesota,MN
-28,Mississippi,MS
-29,Missouri,MO
-30,Montana,MT
-31,Nebraska,NE
-32,Nevada,NV
-33,New Hampshire,NH
-34,New Jersey,NJ
-35,New Mexico,NM
-36,New York,NY
-37,North Carolina,NC
-38,North Dakota,ND
-39,Ohio,OH
-40,Oklahoma,OK
-41,Oregon,OR
-42,Pennsylvania,PA
-44,Rhode Island,RI
-45,South Carolina,SC
-46,South Dakota,SD
-47,Tennessee,TN
-48,Texas,TX
-49,Utah,UT
-50,Vermont,VT
-51,Virginia,VA
-53,Washington,WA
-54,West Virginia,WV
-55,Wisconsin,WI
-56,Wyoming,WY
-72,Puerto Rico,PR
+state_fips,state_name,state_abbr,census_region
+01,Alabama,AL,South
+02,Alaska,AK,West
+04,Arizona,AZ,West
+05,Arkansas,AR,South
+06,California,CA,West
+08,Colorado,CO,West
+09,Connecticut,CT,Northeast
+10,Delaware,DE,South
+11,District of Columbia,DC,South
+12,Florida,FL,South
+13,Georgia,GA,South
+15,Hawaii,HI,West
+16,Idaho,ID,West
+17,Illinois,IL,Midwest
+18,Indiana,IN,Midwest
+19,Iowa,IA,Midwest
+20,Kansas,KS,Midwest
+21,Kentucky,KY,South
+22,Louisiana,LA,South
+23,Maine,ME,Northeast
+24,Maryland,MD,South
+25,Massachusetts,MA,Northeast
+26,Michigan,MI,Midwest
+27,Minnesota,MN,Midwest
+28,Mississippi,MS,South
+29,Missouri,MO,Midwest
+30,Montana,MT,West
+31,Nebraska,NE,Midwest
+32,Nevada,NV,West
+33,New Hampshire,NH,Northeast
+34,New Jersey,NJ,Northeast
+35,New Mexico,NM,West
+36,New York,NY,Northeast
+37,North Carolina,NC,South
+38,North Dakota,ND,Midwest
+39,Ohio,OH,Midwest
+40,Oklahoma,OK,South
+41,Oregon,OR,West
+42,Pennsylvania,PA,Northeast
+44,Rhode Island,RI,Northeast
+45,South Carolina,SC,South
+46,South Dakota,SD,Midwest
+47,Tennessee,TN,South
+48,Texas,TX,South
+49,Utah,UT,West
+50,Vermont,VT,Northeast
+51,Virginia,VA,South
+53,Washington,WA,West
+54,West Virginia,WV,South
+55,Wisconsin,WI,Midwest
+56,Wyoming,WY,West
+72,Puerto Rico,PR,Territory

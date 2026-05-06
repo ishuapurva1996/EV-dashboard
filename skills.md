@@ -197,7 +197,77 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
     - `bev_share between 0 and 1`, `phev_share between 0 and 1`
     - All count columns `>= 0`
 
-### 11. GitHub & collaboration
+### 11. Analytics layer — dashboard-ready marts
+
+End-to-end analytics layer complete: 4 marts spanning state snapshot, time-series, regional rollup, and city-level ranking, plus 1 supporting curated fact and a `census_region` column added to `dim_states`. 132 tests passing across the curated + analytics layers.
+
+#### 11.1 First-pass design — two marts
+- **`mart_state_ev_overview`** — one row per state (latest snapshot). Joins `fct_stations_by_state` (current snapshot) with the most recent year of `fct_ev_adoption_by_state_year` and `stg_census_population` per state. Powers KPI tiles, choropleths, scatter plots, and the leaderboard.
+- **`mart_ev_growth_trends`** — one row per (state, year). Joins `fct_stations_by_state_year` with `fct_ev_adoption_by_state_year` on `(state_fips, year)`, with population held at the latest ACS year. Powers all time-series charts.
+- **Initially scoped to 3 marts; collapsed to 2.** A separate "station density" mart would have re-joined the same tables to produce the same ratios already in the overview mart — a violation of DRY without operational benefit. Density columns live in `mart_state_ev_overview`.
+- **"Latest per state" via `qualify row_number()`** — `qualify row_number() over (partition by state_fips order by registration_year desc) = 1` lets each state pick up its own most-recent AFDC year and ACS year independently. Robust to per-state data gaps; cleaner than a self-join on a max() subquery.
+
+#### 11.2 Reference-driven expansion
+- Surveyed [singhpriyanshu5/us-ev-charging-stations-dashboard](https://github.com/singhpriyanshu5/us-ev-charging-stations-dashboard) — same stack (Airflow + dbt + Snowflake), same three sources (NREL, Census ACS5, EV registrations). Their dashboard exposed five chart angles missing from the initial design; all five added in this phase.
+- **Added `census_region` to `dim_states.csv`** — 4 official US Census regions (Northeast / Midwest / South / West) plus a `Territory` bucket for Puerto Rico. Standard, defensible, single column on the conformed dimension. Required:
+  - Updating `+column_types` in `dbt_project.yml` to type the new column as `varchar`.
+  - Re-seeding via `dbt seed --select dim_states --full-refresh` (52 rows reloaded).
+- **Added `stations_with_dcfast` to `fct_stations_by_state`** — count of stations with at least one DC fast port (`count(case when coalesce(ev_dc_fast_num, 0) > 0 then 1 end)`). Distinct from `total_dcfast_ports` (port count, not station count) — a station with 4 DC fast ports counts once toward `stations_with_dcfast`, four times toward `total_dcfast_ports`.
+
+#### 11.3 New curated fact — `fct_stations_by_city`
+- Grain: `(state_fips, city)`. ~9k rows from ~85k stations.
+- Same column shape as `fct_stations_by_state` (counts + per-tier ports), one level deeper.
+- **City-name normalization gotcha**: NREL transmits city names with inconsistent case and whitespace (`"san francisco"`, `"San Francisco "`). `initcap(trim(city))` collapses variants without losing display readability. Empty/null cities are dropped at this layer — the contract is "named cities only."
+- Tests: composite uniqueness on `(state_fips, city)`, FK to `dim_states`, identity test on `total_ports = level1 + level2 + dcfast`, monotonic test on `stations_with_dcfast <= total_stations`.
+
+#### 11.4 Two new analytics marts
+- **`mart_stations_by_region`** — one row per Census region (5 rows). Aggregates state-level metrics from `mart_state_ev_overview` rather than re-querying the curated facts. **Mart-of-marts pattern**: when a rollup is just sums + ratios over an existing mart's columns, the cheaper path is to layer the new mart on the existing one. Single source of truth for the per-state inputs; no risk of the two marts disagreeing on, say, `total_ev_count` due to subtle filter drift.
+- **`mart_top_cities`** — pass-through of `fct_stations_by_city` with `national_rank` and `state_rank` columns precomputed via `row_number() over (...)`. Dashboard query is `where national_rank <= 20` instead of an order-by-limit at read time. National rank is unique (tie-break alphabetically by city); state rank resets per state.
+
+#### 11.5 Expanded `mart_state_ev_overview`
+- Added 3 columns:
+  - `census_region` (joined from `dim_states`)
+  - `dcfast_penetration_pct` = `stations_with_dcfast × 100 / total_stations` — share of stations offering any DC fast charging
+  - `avg_l2_per_open_station` = `total_level2_ports / stations_open` — distinguishes hub-style deployments (many ports per site) from single-port installs
+- Passed through `stations_with_dcfast` for downstream rollup use.
+- Joins to `dim_states` via INNER JOIN (region must be present); to AFDC and Census via LEFT JOIN (states with no AFDC row still get a station snapshot).
+
+#### 11.6 Final layer counts
+- **8 tables built**, **124 tests passing**, **0 errors** via `dbt build --select curated analytics`.
+- Row-count sanity check via `dbt show`:
+  - `fct_stations_by_city`: 8,993 rows
+  - `mart_state_ev_overview`: 52 rows (50 states + DC + PR)
+  - `mart_stations_by_region`: 5 rows (Northeast / Midwest / South / West / Territory)
+  - `mart_top_cities`: 8,993 rows
+- **Snowflake reserved-word gotcha caught**: initial inline `dbt show` query used `count(*) as rows` — Snowflake rejected `rows` as a column alias (reserved). Renamed to `row_count`.
+
+### 12. Airflow ↔ dbt orchestration
+
+End-to-end pipeline closure: NREL ingest now triggers a downstream dbt DAG so the analytics marts refresh automatically when new station data lands.
+
+#### 12.1 `dags/ev_dbt_dag.py` — the dbt orchestration DAG
+- Three sequential `BashOperator` tasks: `dbt_seed → dbt_run → dbt_test`. Mirrors the structure of the cross-project reference at `weather-forecasting-pipeline/dags/weather_dbt_dag.py`.
+- `schedule=None` — runs only when triggered by upstream DAGs (or manually). No autonomous schedule.
+- **Snowflake creds templated via `default_args.env`** — Jinja-templated from the existing `snowflake_default` Airflow connection that the ingest DAGs already use:
+  ```python
+  "env": {
+      "SNOWFLAKE_USER":      "{{ conn.snowflake_default.login }}",
+      "SNOWFLAKE_PASSWORD":  "{{ conn.snowflake_default.password }}",
+      "SNOWFLAKE_ACCOUNT":   "{{ conn.snowflake_default.extra_dejson.account }}",
+      ...
+  }
+  ```
+  Variable names match the existing `dbt/profiles.yml` (which uses `SNOWFLAKE_*`). Single source of truth for Snowflake credentials — change it in one place (Airflow Connections), every DAG picks it up.
+- **`append_env=True`** on each `BashOperator` — keeps the container's `PATH` so plain `dbt` resolves through the airflow user's pip-installed binary. Without it, `BashOperator.env` *replaces* the inherited environment.
+- **`--project-dir` and `--profiles-dir` flags**, both pointing at `/opt/airflow/dbt` (the mounted dbt project root). Avoids `cd`-ing in the bash command and makes the working dir explicit.
+
+#### 12.2 NREL → dbt chain
+- Added `TriggerDagRunOperator(task_id="trigger_dbt", trigger_dag_id="ev_dbt_pipeline")` to `dags/ingest_station_data.py`. The import for `TriggerDagRunOperator` was already present at the top of the file (added speculatively in an earlier commit but unused) — now actually wired up.
+- Final task chain: `current_ts >> loaded >> final >> trigger_dbt`.
+- **Default trigger rule (`all_success`) — skip propagates**: when `check_last_updated` raises `AirflowSkipException` (NREL data unchanged since last run), the skip cascades through `loaded`, `final`, and `trigger_dbt`. Result: dbt only re-runs on days when NREL actually published new data, not every day at 02:30 regardless. This is the correct economic behavior — re-materializing 8 marts on stale source data is pure waste.
+- **Why a downstream chain instead of a separate schedule?** Coupling dbt to the upstream ingest cadence is correct: dbt's purpose is to refresh marts *because* new data arrived. A separate cron schedule would either fire too early (before NREL completes) or too late (marts stale until the next tick). The trigger-on-success pattern is exactly what we want.
+
+### 13. GitHub & collaboration
 - Initialized git, sanity-checked `.env` exclusion, made first commit, pushed to public repo.
 - README covers prerequisites, 6-step first-time setup, daily workflow, troubleshooting matrix, and branching conventions.
 - `.env.example` pre-fills shared values and leaves only personal fields blank.
@@ -208,7 +278,8 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
   - `e25d681` Add Census ACS5 population ingest; rename NREL DAG for consistency
   - `c30fa9c` Add AFDC seed, schema-routing macro, dbt model scaffolding
   - `ec83940` Build dbt staging layer: sources, schema tests, dim_states seed, three stg_ models
-  - (next commit) Build curated layer: promote dim_states + 3 fact tables + 41 tests
+  - `4a0183e` Build curated layer: promote dim_states + 3 fact tables + 41 tests
+  - (next commit) Build analytics layer + Airflow↔dbt orchestration: 4 marts, region column, city fact, ev_dbt_pipeline DAG, NREL trigger
 
 ---
 
@@ -227,6 +298,11 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
 - Persisting state across runs via Airflow `Variable.get` / `Variable.set`.
 - Wiring the Snowflake provider's `SnowflakeHook.get_conn().cursor()` for transactional batched loading.
 - Managing the metadata DB through Postgres + the `airflow-init` bootstrap pattern.
+- **Orchestrating dbt from Airflow** via `BashOperator` running `dbt seed`/`dbt run`/`dbt test` against the mounted project. Lighter-weight than `cosmos` for a small project; matches the established cross-project pattern.
+- **Templating Snowflake creds from an Airflow connection** via `default_args.env` with Jinja `{{ conn.snowflake_default.login }}` etc. Single source of truth: the Airflow Connections UI. dbt picks the same creds the ingest DAGs use without a parallel `.env` path.
+- **`append_env=True` on `BashOperator`** — `BashOperator.env` *replaces* the inherited environment by default. Setting `append_env=True` merges templated env vars onto the container's existing env so `PATH`, `DBT_PROFILES_DIR`, etc. survive.
+- **`TriggerDagRunOperator` for cross-DAG chaining** — at the end of the NREL ingest DAG, fires `ev_dbt_pipeline` so the marts refresh on the same trigger as the data they depend on.
+- **Skip propagation as economic guardrail** — default trigger rule (`all_success`) means the dbt trigger inherits the upstream skip when NREL reports unchanged data. dbt only re-builds when there's actually new source data; running `dbt build` daily on stale data is pure compute waste.
 
 ### dbt
 - Project initialization with `dbt init`, configuring `dbt_project.yml`, and a four-schema staging/curated/analytics layout.
@@ -253,6 +329,13 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
 - **Date-spine pattern** — `TABLE(GENERATOR(rowcount => N))` + `SEQ4()` to build a contiguous year/date series, then `CROSS JOIN dim_states` for a complete grid that fills LEFT-JOIN gaps with `COALESCE(..., 0)`. Required for any forecasting model that assumes contiguous time.
 - **Defensive `COALESCE` inside arithmetic** — `coalesce(a, 0) + coalesce(b, 0)` prevents one NULL from poisoning the whole expression. SUM-ignoring-nulls only protects per-column aggregation, not in-expression addition.
 - **Monotonic-cumulative consistency tests** (`cumulative_X >= new_X`) and **per-tier sum tests** (`total = level1 + level2 + level3`) — catch silent bugs in window-function arithmetic.
+- **Analytics / mart layer design** — wide, dashboard-shaped tables that pre-join facts to conformed dims so each chart hits one model. Two grains in this project: per-state snapshot (`mart_state_ev_overview`) and state × year time-series (`mart_ev_growth_trends`).
+- **`qualify row_number() over (...) = 1` for "latest per group"** — picks the most-recent row per partition without a self-join on a max() subquery. Per-state robust to gaps: each state independently gets its own latest available year.
+- **Mart-of-marts pattern** — `mart_stations_by_region` aggregates `mart_state_ev_overview` rather than re-querying the curated facts. Single source of truth for per-state inputs; impossible for the two marts to disagree on a measure due to filter drift.
+- **String-key normalization with `initcap(trim(...))`** — collapses inconsistent third-party text keys (city names with case + whitespace variants) into a single canonical form, without losing display-friendly capitalization.
+- **Pre-computed ranks via `row_number() over (order by metric desc)`** — `national_rank` and `state_rank` baked into the mart so the dashboard query is `where rank <= N` instead of a runtime sort+limit. Tie-break alphabetically by name to keep ranks stable across builds.
+- **Per-capita and infrastructure-density ratios** — `stations_per_100k_pop`, `evs_per_1k_pop`, `dcfast_penetration_pct`, `evs_per_open_station`, `avg_l2_per_open_station`. Pattern: `nullif`-protected division, multiplied by a unit-friendly scale (100k or 1k) so the resulting numbers fit chart axes without further transformation.
+- **Snowflake reserved-word awareness** — `rows` cannot be used as a column alias; `count(*) as row_count` instead.
 
 ### Snowflake
 - Schema design across four logical tiers in a single shared database.
@@ -300,6 +383,20 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
 - **Why a complete (state × year) grid via `dim_states CROSS JOIN year_spine` instead of just aggregating where data exists?** Sparse aggregations break time-series analysis. If Wyoming had no station openings in 2019, a `GROUP BY year` produces no row → cumulative SUM has nothing to anchor → forecasting models error or interpolate wildly. The grid forces all 32 years to exist for every state; LEFT JOIN + COALESCE zero-fills empty cells. ~1,600 rows, trivially small, eliminates an entire class of downstream bugs.
 - **Why include both flow (`new_*`) and stock (`cumulative_*`) columns in the same time-series fact?** Both are needed for analytics — flow for "growth rate per year," stock for "stations per 100k people in 2022." Computing one from the other on demand requires a window function in every query. Materializing both pays the compute cost once at build time and serves all reads instantly. Fact tables are caches of pre-computed analytics — that's their job.
 - **Why promote `dim_states` from RAW_EV to CURATED_EV (and not leave it where the seed initially landed)?** Conformed dimensions are *derived* artifacts even when the source is a hand-curated CSV — they encode the business decision of "which states do we recognize?" That decision belongs in the curated tier alongside facts, not in the raw tier where external feeds land. Caused a one-time stale-view bug (Snowflake views resolve table references lazily) — fixed by re-running staging models after the move.
+- **Why two marts instead of three (collapsed station_density into overview)?** A separate "station density" mart would have re-joined the same upstream tables to produce ratios (stations-per-100k, evs-per-station) already available from `fct_stations_by_state` + Census + AFDC. Materializing those ratios as columns inside `mart_state_ev_overview` keeps one source of truth per state and avoids the risk that the two marts disagree on, say, the `total_ev_count` baseline. DRY at the mart layer is the same principle as at the model layer.
+- **Why hold population constant at the latest ACS year inside `mart_ev_growth_trends`?** The dashboard is a current-state view, not a longitudinal demographics study. Joining ACS by year would require either (a) a population-by-year table we don't have (single ACS vintage in `RAW_EV.CENSUS_POPULATION`) or (b) a fallback chain when a year has no match — both add complexity for a metric that barely changes year-over-year. Documenting the constraint in the model description is more honest than fabricating "varying" population.
+- **Why `qualify row_number() = 1` instead of a max-year subquery?** Both work; `qualify` is one CTE and one expression. The subquery alternative requires a self-join on `(state_fips, max_year)` plus another on the original table — three table references to do what `qualify` does in one. Snowflake-specific syntax; cost is portability if we ever migrate.
+- **Why surface five reference-repo chart angles when our 10-chart plan already covered the basics?** The reference (`singhpriyanshu5/us-ev-charging-stations-dashboard`) had been refined past our first pass — five concrete angles (DC fast vs L2 stack, DC fast penetration %, L2-per-station, top cities, regional breakdown) added qualitatively distinct insights without much marginal SQL. Cheap to incorporate; expensive to discover later mid-build.
+- **Why a `Territory` bucket on `census_region` instead of grouping Puerto Rico into the South or excluding it?** Census doesn't classify PR into a region (it's a territory, not a state). Forcing it into `South` would falsely inflate that region's totals; excluding it would silently drop a whole jurisdiction from rollup math. A separate bucket is honest, the `accepted_values` test enumerates it explicitly, and the dashboard can choose to filter it out for "mainland US" comparisons without losing the row.
+- **Why expose `stations_with_dcfast` (count) when `total_dcfast_ports` (sum) already exists?** They answer different questions. Penetration ("what share of stations offer fast charging?") needs station-level boolean rollups; capacity ("how much fast-charging exists?") needs port sums. Computing one from the other inside the mart would require going back to the staging level. Adding the column to `fct_stations_by_state` once pays off in two places (penetration in the overview mart, regional rollup in `mart_stations_by_region`).
+- **Why a mart-of-marts (`mart_stations_by_region` aggregates `mart_state_ev_overview`)?** The state-level mart already encodes filter decisions ("latest AFDC year per state," "latest ACS year per state," "regional bucket from `dim_states`"). A region-level mart that re-queried the curated facts could subtly differ on those choices and produce a different `total_ev_count` than what shows up in the state-level dashboard. Layering keeps the inputs identical by construction.
+- **Why `initcap(trim(city))` for city normalization?** NREL ships inconsistent strings (`"san francisco"`, `"San Francisco "`) — without normalization, two rows for the same city. `lower()` would lose display readability ("san francisco" on a chart looks broken); `trim()` alone wouldn't fix case variance. `initcap(trim())` collapses both axes and produces a chart-ready label. Empty/blank cities are dropped at this layer (the contract is "named cities only"); state-level aggregates already exist for "everything else."
+- **Why pre-compute `national_rank` + `state_rank` instead of letting the dashboard sort+limit?** Two reasons. (1) Stable ranks across deploys — tie-break by city name baked into the SQL means `national_rank=1` doesn't flip between two same-count cities just because a viz library reordered them. (2) Read-time simplicity — `where national_rank <= 20` is one predicate the dashboard never has to think about; an `order by ... limit 20` re-sorts 9k rows on every chart render. Materializing the rank trades a few KB of storage for repeatable, fast reads.
+- **Why a standalone `ev_dbt_pipeline` DAG instead of inlining `dbt build` tasks at the end of each ingest DAG?** Three ingest DAGs (NREL daily, Census yearly, AFDC seed) all need to converge on the same dbt build. Inlining means three copies of the dbt task block to maintain. A separate DAG with `schedule=None` is the single point of orchestration; any upstream DAG triggers it via `TriggerDagRunOperator`. Adds one DAG file, removes future drift.
+- **Why `schedule=None` on the dbt DAG instead of a daily cron?** The marts only need to refresh when source data changes. A cron schedule would either fire too early (before NREL completes) or too late (waiting for the next tick after a successful ingest). Triggering downstream from the ingest gives "new data → marts refresh" without a calendar dependency. Census and AFDC change annually/manually; their cadence is too rare to dictate a daily cron, but the trigger pattern still applies if/when they fire.
+- **Why default skip propagation rather than `trigger_rule="none_failed"` on the dbt trigger?** Dbt rebuilding identical marts from unchanged source data is waste. The NREL DAG's `check_last_updated` task already short-circuits the day's run when the source hasn't changed; that skip should cascade to the dbt trigger by default. If a future scenario calls for "rebuild marts even when NREL didn't change" (e.g., a model change without a data change), that's better handled by a manual trigger or a separate cron, not by changing the chain's normal economics.
+- **Why template Snowflake creds from `conn.snowflake_default` rather than rely on `.env`?** The `.env` file works inside the container (loaded via `env_file:` in compose), but the `.env` and the Airflow Connection are two parallel sources of truth that can drift. The ingest DAGs already use the connection (`SnowflakeHook(snowflake_conn_id="snowflake_default")`); the dbt DAG should too. Templating closes the loop: change the connection in the UI, every DAG (ingest *and* dbt) picks it up. `.env` becomes a developer-convenience file for local CLI work, not a runtime dependency.
+- **Why `append_env=True` on the dbt `BashOperator`s?** `BashOperator.env` *replaces* the inherited environment by default — setting it without `append_env=True` would strip the container's `PATH`, breaking plain `dbt` invocations. Setting `append_env=True` merges the templated Snowflake creds onto the container env. The cross-project reference DAG sidesteps the issue by hardcoding `/opt/dbt_venv/bin/dbt` (absolute path); we keep the more portable plain-`dbt` form by appending instead.
 
 ---
 
@@ -314,10 +411,11 @@ End-to-end build complete: dim_states promoted to CURATED_EV, three fact tables 
 | 5 | `dim_states` dbt seed — FIPS ↔ state name ↔ 2-letter abbreviation lookup | ✅ Done |
 | 6 | dbt staging models (`stg_nrel_stations`, `stg_census_population`, `stg_afdc_registrations`) | ✅ Done |
 | 7 | dbt curated layer (deduplicated, normalized fact + dimension tables) | ✅ Done |
-| 8 | dbt analytics layer (per-state station density, top-20 cities, gap ranking, stations-per-100k) | Not started |
-| 9 | 12-month time-series forecast (EV adoption + infrastructure expansion) | Not started |
-| 10 | Preset.io dashboard | Not started |
+| 8 | dbt analytics layer — 4 marts (state overview, growth trends, regional rollup, top cities) | ✅ Done |
+| 9 | Airflow → dbt orchestration (`ev_dbt_pipeline` DAG + NREL trigger) | ✅ Done |
+| 10 | Dashboard build (Streamlit / Plotly / Preset.io) on the analytics marts | Not started |
+| 11 | 12-month time-series forecast (EV adoption + infrastructure expansion) | Not started |
 
 ---
 
-*Last updated: 2026-05-04.*
+*Last updated: 2026-05-05.*

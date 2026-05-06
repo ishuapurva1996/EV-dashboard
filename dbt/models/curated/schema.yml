@@ -41,6 +41,14 @@ models:
         description: "Stations with status_code = 'T' (temporarily unavailable)."
         tests:
           - not_null
+      - name: stations_with_dcfast
+        description: "Count of stations (any status) that have at least one DC fast-charging port."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+          - dbt_utils.expression_is_true:
+              expression: "<= total_stations"
       - name: total_level1_ports
         description: "Sum of Level 1 (120V) ports across all stations in the state."
         tests:
@@ -207,3 +215,46 @@ models:
           - not_null
           - dbt_utils.expression_is_true:
               expression: "= cumulative_level1_ports + cumulative_level2_ports + cumulative_dcfast_ports"
+
+  - name: fct_stations_by_city
+    description: "One row per (state, city) — NREL station counts and port capacity aggregated to the city level. City is normalized via initcap(trim(...)) to collapse whitespace/case variants. Rows with NULL or blank city are dropped. Grain: (state_fips, city)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_fips
+            - city
+    columns:
+      - name: state_fips
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        tests:
+          - not_null
+      - name: state_name
+        tests:
+          - not_null
+      - name: city
+        description: "Normalized city name (initcap + trim of NREL `city`)."
+        tests:
+          - not_null
+      - name: total_stations
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: stations_open
+        tests:
+          - not_null
+      - name: stations_with_dcfast
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "<= total_stations"
+      - name: total_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= total_level1_ports + total_level2_ports + total_dcfast_ports"

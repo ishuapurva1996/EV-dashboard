@@ -195,7 +195,13 @@ with DAG(
     loaded = extract_transform_load(NREL_BASE, TARGET_TABLE)
     final = update_high_water_mark(current_ts)
 
-    current_ts >> loaded >> final   # gate → ETL → watermark update
+    trigger_dbt = TriggerDagRunOperator(
+        task_id="trigger_dbt",
+        trigger_dag_id="ev_dbt_pipeline",
+        wait_for_completion=False,
+    )
+
+    current_ts >> loaded >> final >> trigger_dbt   # gate → ETL → watermark → dbt
 
     
 

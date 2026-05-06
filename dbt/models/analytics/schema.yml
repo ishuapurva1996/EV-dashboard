@@ -1,0 +1,205 @@
+version: 2
+
+models:
+
+  - name: mart_state_ev_overview
+    description: "One row per US state — latest-available snapshot of stations, EV registrations, population, and derived per-capita / infrastructure ratios. Joins fct_stations_by_state (current snapshot) with the most recent year of fct_ev_adoption_by_state_year and stg_census_population per state. Powers KPI tiles, choropleths, scatter, and the state leaderboard."
+    columns:
+      - name: state_fips
+        description: "Two-character FIPS state code. PK and FK to dim_states."
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        tests:
+          - not_null
+          - unique
+      - name: state_name
+        tests:
+          - not_null
+          - unique
+      - name: census_region
+        description: "US Census region (Northeast / Midwest / South / West / Territory). Sourced from dim_states."
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Northeast', 'Midwest', 'South', 'West', 'Territory']
+      - name: total_stations
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: stations_open
+        tests:
+          - not_null
+      - name: stations_with_dcfast
+        description: "Count of stations with at least one DC fast port. Passed through from fct_stations_by_state."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "<= total_stations"
+      - name: total_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= total_level1_ports + total_level2_ports + total_dcfast_ports"
+      - name: dcfast_penetration_pct
+        description: "Share of stations that offer any DC fast charging (stations_with_dcfast × 100 / total_stations). Range [0, 100]."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                where: "dcfast_penetration_pct is not null"
+      - name: avg_l2_per_open_station
+        description: "Mean Level-2 ports per *open* station. Reveals hub-style deployments (many ports per site) vs single-port installs. NULL when stations_open = 0."
+      - name: ev_data_year
+        description: "Most recent registration_year present in fct_ev_adoption_by_state_year for this state. NULL only if AFDC has no rows for the state."
+      - name: total_ev_count
+        description: "BEV + PHEV registrations in the state for ev_data_year."
+      - name: bev_share
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 1"
+              config:
+                where: "bev_share is not null"
+      - name: population_year
+        description: "Most recent ACS year available for this state."
+      - name: population
+        description: "Latest ACS population estimate for the state."
+      - name: stations_per_100k_pop
+        description: "total_stations × 100,000 / population. NULL if population is missing or zero."
+      - name: dcfast_ports_per_100k_pop
+        description: "DC fast-charging ports per 100k residents."
+      - name: evs_per_1k_pop
+        description: "Total EVs per 1,000 residents (latest AFDC year, latest ACS population)."
+      - name: evs_per_open_station
+        description: "total_ev_count / stations_open. Higher = under-served infrastructure."
+      - name: ports_per_ev
+        description: "total_ports / total_ev_count. Inverse density — higher = more infrastructure per EV."
+
+  - name: mart_ev_growth_trends
+    description: "One row per state × year — station flow + stock joined to EV registrations and held-constant latest population. Years outside AFDC coverage have NULL ev_* columns by design. Powers all time-series charts (lines, stacked areas, YoY bars)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_fips
+            - year
+    columns:
+      - name: state_fips
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: state_abbr
+        tests:
+          - not_null
+      - name: state_name
+        tests:
+          - not_null
+      - name: year
+        description: "Calendar year. Sourced from fct_stations_by_state_year.vintage_year (1995–current)."
+        tests:
+          - not_null
+      - name: new_stations
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"
+      - name: new_total_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= new_level1_ports + new_level2_ports + new_dcfast_ports"
+      - name: cumulative_stations
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= new_stations"
+      - name: cumulative_total_ports
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "= cumulative_level1_ports + cumulative_level2_ports + cumulative_dcfast_ports"
+      - name: total_ev_count
+        description: "Total EV registrations from fct_ev_adoption_by_state_year. NULL for years outside AFDC coverage."
+      - name: ev_yoy_growth_pct
+        description: "Year-over-year EV growth from the upstream fact. NULL for the earliest AFDC year per state and for years with no AFDC row."
+      - name: population_latest
+        description: "Latest ACS population for the state, held constant across all years (acceptable since the dashboard is a current-state view, not a longitudinal demographics study)."
+      - name: cumulative_stations_per_100k_pop
+        description: "Stock × 100,000 / population_latest. Comparable across states, not strictly across years (population is fixed)."
+      - name: evs_per_station
+        description: "total_ev_count / cumulative_stations for years where both are present. Lower = better-served by infrastructure."
+      - name: stations_yoy_growth_pct
+        description: "Year-over-year percent change in cumulative_stations. NULL when prior_year_cumulative_stations is 0 or missing."
+
+  - name: mart_stations_by_region
+    description: "One row per US Census region — station and EV totals rolled up from mart_state_ev_overview. Population is summed across states for region-level density ratios. Includes the 'Territory' bucket (Puerto Rico) for completeness; the dashboard typically filters to the four mainland regions."
+    columns:
+      - name: census_region
+        tests:
+          - not_null
+          - unique
+          - accepted_values:
+              values: ['Northeast', 'Midwest', 'South', 'West', 'Territory']
+      - name: state_count
+        description: "Number of states/jurisdictions in the region."
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: total_stations
+        tests:
+          - not_null
+      - name: stations_with_dcfast
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "<= total_stations"
+      - name: stations_per_100k_pop
+        description: "Region-level stations per 100k residents."
+      - name: evs_per_open_station
+        description: "Region-level infrastructure-gap ratio (lower is better-served)."
+      - name: dcfast_penetration_pct
+        description: "Region-level share of stations offering any DC fast charging."
+        tests:
+          - dbt_utils.expression_is_true:
+              expression: "between 0 and 100"
+              config:
+                where: "dcfast_penetration_pct is not null"
+
+  - name: mart_top_cities
+    description: "One row per (state, city) — pass-through of fct_stations_by_city with national_rank and state_rank precomputed. The dashboard's 'Top N cities' chart selects `where national_rank <= N`. Grain: (state_fips, city)."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - state_fips
+            - city
+    columns:
+      - name: state_fips
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_states')
+              field: state_fips
+      - name: city
+        tests:
+          - not_null
+      - name: total_stations
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "> 0"
+      - name: national_rank
+        description: "Global rank by total_stations across all (state, city) pairs. Ties broken alphabetically by city."
+        tests:
+          - not_null
+          - unique
+      - name: state_rank
+        description: "Rank by total_stations within state. Ties broken alphabetically by city."
+        tests:
+          - not_null
