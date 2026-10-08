@@ -11,7 +11,7 @@
   let data, busy=false, pending=false;
   function theme() {
     const dark=document.documentElement.dataset.theme==='dark';
-    return {dark, ink:dark?'#eef3f9':'#202b37',muted:dark?'#b5c3d2':'#566372',grid:dark?'#344454':'#e8edf2',blue:dark?'#50b5ff':'#0875c9',navy:dark?'#89aaff':'#2c5189'};
+    return {dark, ink:dark?'#eef3f9':'#202b37',muted:dark?'#b5c3d2':'#566372',grid:dark?'#344454':'#e8edf2',blue:dark?'#50b5ff':'#0875c9',orange:dark?'#ffb15c':'#c86512',navy:dark?'#89aaff':'#2c5189'};
   }
   function table(id, rows, columns) {
     const host=$(id+'-table');host.replaceChildren();
@@ -36,10 +36,10 @@
     await Plotly.react(host,traces,layout,{responsive:true,displayModeBar:false,scrollZoom:false,
       topojsonURL:new URL('assets/maps/',document.baseURI).href});
   }
-  function bars(id,rows,field,label,{horizontal=false,percent=false}={}) {
+  function bars(id,rows,field,label,{horizontal=false,percent=false,color='blue'}={}) {
     const t=theme(),labels=rows.map(r=>r.state_abbr||r.census_region||r.label),values=rows.map(r=>r[field]);
     return plot(id,[{type:'bar',x:horizontal?values:labels,y:horizontal?labels:values,orientation:horizontal?'h':'v',
-      marker:{color:t.blue},hovertemplate:horizontal?'%{y}: %{x:,.2f}'+(percent?'%':'')+'<extra></extra>':'%{x}: %{y:,.2f}<extra></extra>'}],
+      marker:{color:t[color]},hovertemplate:horizontal?'%{y}: %{x:,.2f}'+(percent?'%':'')+'<extra></extra>':'%{x}: %{y:,.2f}<extra></extra>'}],
       horizontal?{margin:{l:65,r:24,t:12,b:50},xaxis:{title:label,gridcolor:t.grid,zerolinecolor:t.grid,automargin:true,ticksuffix:percent?'%':''},yaxis:{autorange:'reversed',automargin:true}}:
       {yaxis:{title:label,gridcolor:t.grid,zerolinecolor:t.grid,automargin:true,rangemode:'tozero'}});
   }
@@ -67,7 +67,7 @@
       const stationRows=ranked(states,'total_stations',15);tasks.push(bars('stations',stationRows,'total_stations','Stations'));table('stations',stationRows,[['state_name','Jurisdiction'],['total_stations','Stations'],['stations_open','Available'],['stations_planned','Planned']]);
       const ports=ranked(states.map(r=>({...r,combined:r.total_level2_ports+r.total_dcfast_ports})),'combined',10).reverse();
       tasks.push(plot('ports',[{type:'bar',orientation:'h',name:'Level 2',x:ports.map(r=>r.total_level2_ports),y:ports.map(r=>r.state_abbr),marker:{color:t.blue},hovertemplate:'%{y}: %{x:,} Level 2 ports<extra></extra>'},
-        {type:'bar',orientation:'h',name:'DC fast',x:ports.map(r=>r.total_dcfast_ports),y:ports.map(r=>r.state_abbr),marker:{color:t.navy},hovertemplate:'%{y}: %{x:,} DC fast ports<extra></extra>'}],{barmode:'stack',margin:{l:45,r:20,t:12,b:80},xaxis:{title:'Ports',gridcolor:t.grid,automargin:true},yaxis:{automargin:true}}));
+        {type:'bar',orientation:'h',name:'DC fast',x:ports.map(r=>r.total_dcfast_ports),y:ports.map(r=>r.state_abbr),marker:{color:t.orange},hovertemplate:'%{y}: %{x:,} DC fast ports<extra></extra>'}],{barmode:'stack',margin:{l:45,r:20,t:12,b:80},xaxis:{title:'Ports',gridcolor:t.grid,automargin:true},yaxis:{automargin:true}}));
       table('ports',ports.slice().reverse(),[['state_name','Jurisdiction'],['total_level2_ports','Level 2 ports'],['total_dcfast_ports','DC fast ports']]);
       const trendStates=ranked(states,'total_stations',5),start=Number($('start-year').value);
       const growth=data.growth.filter(r=>abbrs.has(r.state_abbr)&&r.year>=start);
@@ -81,14 +81,14 @@
         {type:'scatter',mode:'lines+markers',name:'Plug-in hybrid',x:registrationYears,y:registrations.map(r=>r.phev_count),line:{color:t.navy},hovertemplate:'%{x}: %{y:,} PHEVs<extra></extra>'}],{xaxis:{dtick:1,gridcolor:t.grid,automargin:true},yaxis:{title:'Registered vehicles',gridcolor:t.grid,automargin:true,rangemode:'tozero'},margin:{l:75,r:20,t:20,b:80}}));
       table('registrations',registrations,[['year','Registration year'],['bev_count','BEVs'],['phev_count','PHEVs'],['total_ev_count','Total EVs'],['coverage','Jurisdictions with data']]);
       const cities=ranked(data.cities.filter(r=>abbrs.has(r.state_abbr)).map(r=>({...r,label:r.city+', '+r.state_abbr})),'total_stations',15).reverse();
-      tasks.push(bars('cities',cities.map(r=>({...r,state_abbr:r.label})),'total_stations','Stations',{horizontal:true}));
+      tasks.push(bars('cities',cities.map(r=>({...r,state_abbr:r.label})),'total_stations','Stations',{horizontal:true,color:'orange'}));
       table('cities',cities.slice().reverse(),[['city','City'],['state_abbr','State'],['total_stations','Stations'],['stations_open','Available stations']]);
       const regions=[...new Set(states.map(r=>r.census_region))].sort().map(census_region=>{const rows=states.filter(r=>r.census_region===census_region),ev=rows.filter(r=>r.total_ev_count!=null);return {census_region,total_stations:sum(rows,'total_stations'),total_ev_count:sum(ev,'total_ev_count'),stations_open:sum(ev,'stations_open'),evs_per_open_station:ratio(sum(ev,'total_ev_count'),sum(ev,'stations_open'))};});
       tasks.push(plot('regions',[{type:'pie',hole:.5,labels:regions.map(r=>r.census_region),values:regions.map(r=>r.total_stations),sort:false,textinfo:'label+percent',marker:{colors},hovertemplate:'%{label}: %{value:,} stations (%{percent})<extra></extra>'}],{margin:{l:35,r:35,t:30,b:60},showlegend:false}));
       table('regions',regions,[['census_region','Region'],['total_stations','Stations']]);
       tasks.push(bars('region-gap',regions,'evs_per_open_station','EVs / open station',{horizontal:true}));table('region-gap',regions,[['census_region','Region'],['total_ev_count','Registered EVs'],['stations_open','EV-covered available stations'],['evs_per_open_station','EVs / open station']]);
       const fast=ranked(states,'dcfast_penetration_pct',20),l2=ranked(states,'avg_l2_per_open_station',20);
-      tasks.push(bars('fast',fast,'dcfast_penetration_pct','Share of station locations',{horizontal:true,percent:true}));table('fast',fast,[['state_name','Jurisdiction'],['stations_with_dcfast','Stations with DC fast'],['total_stations','All stations'],['dcfast_penetration_pct','Share (%)']]);
+      tasks.push(bars('fast',fast,'dcfast_penetration_pct','Share of station locations',{horizontal:true,percent:true,color:'orange'}));table('fast',fast,[['state_name','Jurisdiction'],['stations_with_dcfast','Stations with DC fast'],['total_stations','All stations'],['dcfast_penetration_pct','Share (%)']]);
       tasks.push(bars('l2',l2,'avg_l2_per_open_station','Level 2 ports / open station',{horizontal:true}));table('l2',l2,[['state_name','Jurisdiction'],['total_level2_ports','Level 2 ports'],['stations_open','Available stations'],['avg_l2_per_open_station','Level 2 / open station']]);
       await Promise.all(tasks);
       document.body.dataset.ready='true';
