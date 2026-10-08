@@ -2,7 +2,7 @@
 
 ## Current verification status
 
-The static companion and publication code are prepared. GitHub Pages deployment and automatic refresh have not yet been verified. The owner authorized their current Snowflake account; its connection was verified and the four EV schemas created in the existing `WEATHER_FORECASTING` database. The original EV training account was unavailable. A real complete pipeline export is still required before deploying: synthetic browser fixtures are never a production fallback.
+The owner-authorized current Snowflake connection is verified, with separate EV schemas in the existing `WEATHER_FORECASTING` database. Real station and Census source loads, dbt seed, all 11 models, and all 145 warehouse tests succeeded on October 8, 2026. The first immutable private export was stored and its exact bytes verified against its SHA-256. It includes 52 jurisdictions, five regions, 1,664 growth rows, and 1,017 city rows. The checked-in snapshot preserves that real export and its original source/build dates. Pages publication and automatic dispatch verification are still pending; synthetic browser fixtures are never a production fallback.
 
 The station provider retired `developer.nrel.gov` on May 29, 2026. Ingestion uses the documented `developer.nlr.gov` replacement. Existing keys remain valid according to the [official transition notice](https://developer.nlr.gov/docs/nlr-domain-transition/). The owner authorized the saved EV key at this hostname. Bounded timestamp and one-station checks returned HTTP 200 on October 8, 2026, with the expected ingestion fields; full ingestion has not yet run. The Census 2024 API connection was also verified successfully.
 
@@ -24,7 +24,8 @@ Use the EV checkout's ignored `.env`; do not reuse another project's credentials
 | `NREL_API_KEY`, `CENSUS_API_KEY` | Local ignored `.env` | EV source ingestion. Never exported to Pages. |
 | `DASHBOARD_S3_BUCKET` | Local ignored `.env`; GitHub repository Actions **secret** | Private export bucket for Airflow and Pages assembly. |
 | `DASHBOARD_S3_PREFIX` | Same locations | Dedicated `dashboard/ev` prefix. |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` | Local ignored `.env` or trusted short-lived EV writer environment | Dedicated EV-prefix writer. The project does not mount the personal `~/.aws` folder. |
+| `AWS_CREDENTIALS_DIR` | Local ignored `.env` | Existing AWS profile directory, mounted read-only as in weather and movie. The owner explicitly approved this access for EV. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` | Local ignored `.env` or trusted short-lived writer environment | Optional alternative to the mounted profile. A new upload user/key is unnecessary when the existing profile can write the EV prefix. |
 | `AWS_DEFAULT_REGION` | Local ignored `.env` | EV writer region. |
 | `DASHBOARD_AIRFLOW_API_URL` | Local ignored `.env` | `http://localhost:8080` inside the EV container, or HTTPS for a remote host. |
 | `DASHBOARD_AIRFLOW_USERNAME`, `DASHBOARD_AIRFLOW_PASSWORD` | Local ignored `.env` | Existing reader able to read DAG runs, task instances and XCom completion receipts through Airflow 2.10's `/api/v1`. |
@@ -35,7 +36,7 @@ Use the EV checkout's ignored `.env`; do not reuse another project's credentials
 
 Settings links: [Actions secrets](https://github.com/ishuapurva1996/EV-dashboard/settings/secrets/actions), [Actions variables](https://github.com/ishuapurva1996/EV-dashboard/settings/variables/actions), [Pages source](https://github.com/ishuapurva1996/EV-dashboard/settings/pages), [deployment environments](https://github.com/ishuapurva1996/EV-dashboard/settings/environments).
 
-Keep credentials private. Token creation, credential expansion or IAM changes require owner approval. This repository contains no provisioned AWS role and no saved credentials. Recreate the EV Airflow container after `.env` changes so it receives the new values. Preserve the existing metadata volume.
+Keep credentials private. Token creation, credential expansion or IAM changes require owner approval. Private runtime credentials remain in the ignored local `.env` and authorized AWS profile. The owner created the separate `EVDashboardPagesReader` role; actual GitHub OIDC authentication still needs deployment verification. Recreate the EV Airflow container after `.env` changes so it receives the new values. Preserve the existing metadata volume.
 
 ## AWS scope
 
@@ -46,7 +47,7 @@ The GitHub reader needs only `s3:GetObject` on those same keys. Restrict AWS OID
 ## First real publication
 
 1. Resolve the working EV Snowflake account and source endpoint authorization, then create the EV source tables/schemas as appropriate for that account. Do not rerun the old hard-coded training-account `snowflake/setup.sql` in another account without adapting it.
-2. Configure the dedicated writer, private S3 prefix and Airflow metadata reader. Build the EV image, initialize its own Airflow/Postgres stack, and register `snowflake_default`. Existing services must not be stopped or replaced.
+2. Configure the authorized existing AWS profile, private EV S3 prefix and Airflow metadata reader. Build the EV image, initialize its own Airflow/Postgres stack, and register `snowflake_default`. Existing services must not be stopped or replaced.
 3. Run Census ingestion once, then a fresh complete station-ingestion run. Its chained dbt pipeline must finish the real seed/run/test and validated private export. Initial Census-triggered publication may fail until the first station source exists; then the subsequent complete station chain is the eligible build.
 4. Inspect the immutable real export and contract validation. A snapshot-only first publication is available by placing that real export and SHA-256 file together in `web_dashboard/snapshot/`; original capture/build dates remain unchanged.
 5. Enable GitHub Pages **GitHub Actions** source, configure the EV OIDC reader and repository settings, restrict the environment to main, and merge the reviewed implementation.

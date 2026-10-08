@@ -1,0 +1,5 @@
+# Airflow code is mounted at runtime; the image only needs these build files.
+**
+!Dockerfile
+!requirements-dashboard.txt
+!.dockerignore

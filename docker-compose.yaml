@@ -77,6 +77,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/dbt:/opt/airflow/dbt
     - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts:ro
     - ${AIRFLOW_PROJ_DIR:-.}/web_dashboard:/opt/airflow/web_dashboard:ro
+    - ${AWS_CREDENTIALS_DIR:-~/.aws}:/home/airflow/.aws:ro
     - /var/run/docker.sock:/var/run/docker.sock
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
