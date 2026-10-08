@@ -2,6 +2,8 @@
 
 End-to-end data pipeline analyzing US EV charging station coverage and cross-referencing it against state-level EV adoption to surface infrastructure gaps. Built for DATA 226 (Group 5).
 
+**[Open the live EV dashboard](https://ishuapurva1996.github.io/EV-dashboard/)**
+
 **Pipeline:** NREL + DOE/AFDC + Census APIs → Airflow → Snowflake (RAW) → dbt (CURATED → ANALYTICS) → Preset.io dashboard.
 
 **Team:** Pragya Apurva, Pragya Chourasia, Pinal Pawar, Sanjana Reddy Khatam.
@@ -11,7 +13,11 @@ End-to-end data pipeline analyzing US EV charging station coverage and cross-ref
 
 The static companion preserves the existing Preset chart layout and adds state/region controls, source-date details, accessible data tables, and a saved light/dark theme. Its publication code follows the movie project: successful Airflow and dbt processing → validated private S3 export → GitHub Actions → Pages.
 
-**Real export verified; Pages publication is being verified.** Real source loads, all 11 models, all 145 warehouse tests, and the private export succeeded on October 8, 2026 using the current working Snowflake account. The checked-in snapshot preserves that export and its original dates. See [dashboard setup and recovery](docs/DASHBOARD_OPERATIONS.md) for settings, schedules, and verification. A verified live link and preview will be added after deployment succeeds.
+Automatic refresh is enabled and verified in the [October 8, 2026 deployment](https://github.com/ishuapurva1996/EV-dashboard/actions/runs/37834297183). Real source loads, all 11 models, all 145 warehouse checks, the validated S3 export, Airflow dispatch, AWS OIDC authentication, and Pages publication succeeded. The public JSON exactly matches the private export.
+
+Station data is checked daily at **02:30 UTC** (7:30 PM PDT / 6:30 PM PST on the previous local day). Keep this computer and Docker running. Census polls its configured 2024 dataset annually. Advancing the Census year and updating AFDC registration seeds require manual annual updates. A later daily occurrence has not yet been observed. See [dashboard operations](docs/DASHBOARD_OPERATIONS.md) for setup, token rotation, and recovery.
+
+[![Live EV dashboard preview](docs/assets/dashboard-preview.jpg)](https://ishuapurva1996.github.io/EV-dashboard/)
 
 ---
 

@@ -2,9 +2,13 @@
 
 ## Current verification status
 
-The owner-authorized current Snowflake connection is verified, with separate EV schemas in the existing `WEATHER_FORECASTING` database. Real station and Census source loads, dbt seed, all 11 models, and all 145 warehouse tests succeeded on October 8, 2026. The first immutable private export was stored and its exact bytes verified against its SHA-256. It includes 52 jurisdictions, five regions, 1,664 growth rows, and 1,017 city rows. The checked-in snapshot preserves that real export and its original source/build dates. Pages publication and automatic dispatch verification are still pending; synthetic browser fixtures are never a production fallback.
+The [live EV dashboard](https://ishuapurva1996.github.io/EV-dashboard/) is published with `DASHBOARD_PUBLICATION_MODE=airflow`. The [verified automatic deployment](https://github.com/ishuapurva1996/EV-dashboard/actions/runs/37834297183) succeeded on October 8, 2026: Airflow exported the tested EV build and dispatched GitHub, GitHub authenticated through the separate EV read-only OIDC role, assembled the private bundle, deployed Pages, and verified the canonical public checksum. Independent verification confirmed the public bytes exactly match the latest private export.
 
-The station provider retired `developer.nrel.gov` on May 29, 2026. Ingestion uses the documented `developer.nlr.gov` replacement. Existing keys remain valid according to the [official transition notice](https://developer.nlr.gov/docs/nlr-domain-transition/). The owner authorized the saved EV key at this hostname. Bounded timestamp and one-station checks returned HTTP 200 on October 8, 2026, with the expected ingestion fields; full ingestion has not yet run. The Census 2024 API connection was also verified successfully.
+Real Census and station loads succeeded in the owner-authorized current Snowflake account, with separate EV schemas in the existing `WEATHER_FORECASTING` database. All 11 models and all 145 warehouse tests passed. The public bundle contains 52 jurisdictions, five regions, 1,664 growth rows and 1,017 city rows. Station capture is `2026-10-08T19:22:30.048770+00:00`; Census capture is `2026-10-08T19:21:50.078113+00:00`; warehouse completion is `2026-10-08T19:40:53.668547+00:00`; export time is `2026-10-08T19:45:07.484875Z`. The checked-in snapshot retains the earlier first real export and its original dates; it is inactive while automatic mode is enabled.
+
+The station source ran when its daily schedule was enabled and automatically triggered the successful model/export/dispatch chain. An export retry followed repair of a stale Docker bind mount after switching checkouts; successful source/build receipts and unchanged warehouse tables were reverified before retrying only that export. A later daily scheduled occurrence has not yet been observed. All 13 publication tests passed. Real-data desktop/mobile checks passed on the assembled site, and public charts, jurisdiction/region/year controls, themes and console checks passed after automatic deployment. The README preview was captured from the verified refreshed public page.
+
+The station provider retired `developer.nrel.gov` on May 29, 2026. Ingestion uses the documented `developer.nlr.gov` replacement. Existing keys remain valid according to the [official transition notice](https://developer.nlr.gov/docs/nlr-domain-transition/). The owner authorized the saved EV key at this hostname. Bounded timestamp and one-station checks returned HTTP 200 on October 8, 2026; subsequent full station ingestion and the Census 2024 load both succeeded.
 
 ## Data path
 
@@ -12,7 +16,7 @@ Changed public station source → Airflow ingestion → dbt seed/run/test → co
 
 Both source loads and all three dbt tasks must have actual successful execution receipts. Manually marking a failed task successful cannot make a bundle eligible. Daily station and annual population captures are selected independently. Competing runs or changed warehouse tables reject the export. dbt-run, test and export fingerprints must agree. External/manual writes during a dbt build are not coordinated by Airflow; avoid concurrent manual writes to these EV schemas. A fingerprint detects subsequent changes; it is not a database-wide lock.
 
-The default station schedule remains **02:30 UTC daily** (7:30 PM the previous day in Los Angeles during daylight saving time, 6:30 PM during standard time). Unchanged station data skips ingestion and its downstream build. Census ingestion keeps its annual `@yearly` schedule and triggers a model rebuild after a successful load. AFDC registrations are a manually maintained annual seed: an automated seed run does not download a new registration year. Airflow and Docker must remain running on this computer for schedules to execute.
+The default station schedule remains **02:30 UTC daily** (7:30 PM the previous day in Los Angeles during daylight saving time, 6:30 PM during standard time). Unchanged station data skips ingestion and its downstream build. Census ingestion keeps its annual `@yearly` schedule and triggers a model rebuild after a successful load. AFDC registrations are a manually maintained annual seed: an automated seed run does not download a new registration year. Census polls the configured ACS 2024 endpoint annually; advancing its year requires updating the ingestion endpoint/year and matching public source attribution before a fresh complete build. Airflow and Docker must remain running on this computer for schedules to execute.
 
 ## Runtime configuration
 
@@ -28,7 +32,7 @@ Use the EV checkout's ignored `.env`; do not reuse another project's credentials
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN` | Local ignored `.env` or trusted short-lived writer environment | Optional alternative to the mounted profile. A new upload user/key is unnecessary when the existing profile can write the EV prefix. |
 | `AWS_DEFAULT_REGION` | Local ignored `.env` | EV writer region. |
 | `DASHBOARD_AIRFLOW_API_URL` | Local ignored `.env` | `http://localhost:8080` inside the EV container, or HTTPS for a remote host. |
-| `DASHBOARD_AIRFLOW_USERNAME`, `DASHBOARD_AIRFLOW_PASSWORD` | Local ignored `.env` | Existing reader able to read DAG runs, task instances and XCom completion receipts through Airflow 2.10's `/api/v1`. |
+| `DASHBOARD_AIRFLOW_USERNAME`, `DASHBOARD_AIRFLOW_PASSWORD` | Local ignored `.env` | EV local Airflow login able to read DAG runs, task instances and XCom completion receipts through Airflow 2.10's `/api/v1`. |
 | `DASHBOARD_GITHUB_TOKEN` | Local ignored `.env` | Fine-grained, expiring token limited to `ishuapurva1996/EV-dashboard`, Actions read/write; dispatches `deploy-dashboard.yml` on main. |
 | `DASHBOARD_AWS_ROLE_ARN` | GitHub repository Actions **secret** | Separate read-only OIDC role for this EV repository's `github-pages` environment. |
 | `DASHBOARD_AWS_REGION` | GitHub repository Actions **variable** | Region for Actions OIDC/S3 access. Must match the bucket. |
@@ -36,7 +40,7 @@ Use the EV checkout's ignored `.env`; do not reuse another project's credentials
 
 Settings links: [Actions secrets](https://github.com/ishuapurva1996/EV-dashboard/settings/secrets/actions), [Actions variables](https://github.com/ishuapurva1996/EV-dashboard/settings/variables/actions), [Pages source](https://github.com/ishuapurva1996/EV-dashboard/settings/pages), [deployment environments](https://github.com/ishuapurva1996/EV-dashboard/settings/environments).
 
-Keep credentials private. Token creation, credential expansion or IAM changes require owner approval. Private runtime credentials remain in the ignored local `.env` and authorized AWS profile. The owner created the separate `EVDashboardPagesReader` role; actual GitHub OIDC authentication still needs deployment verification. Recreate the EV Airflow container after `.env` changes so it receives the new values. Preserve the existing metadata volume.
+Keep credentials private. Token creation, credential expansion or IAM changes require owner approval. Private runtime credentials remain in the ignored local `.env` and authorized AWS profile. The separate `EVDashboardPagesReader` role and its object-read permissions were verified by the successful automatic deployment. Recreate the EV Airflow container after `.env` changes so it receives the new values. Preserve the existing metadata volume.
 
 ## AWS scope
 
@@ -61,6 +65,10 @@ Install `requirements-dashboard.txt` plus `requests` in an isolated environment.
 For a **real** local bundle: `python scripts/build_dashboard_site.py --bundle /absolute/path/dashboard.json --output /absolute/path/public-site`, then serve that directory over HTTP. For a real checked-in snapshot: `python scripts/build_dashboard_site.py --snapshot --state /absolute/path/selection.json --output /absolute/path/public-site`.
 
 Synthetic fixtures are only for local tests; `--allow-synthetic` requires local `--bundle` and is rejected inside Actions. Pull-request validation has no warehouse/AWS/export credentials and never deploys. Assets and JSON use relative repository-base paths; the USA map data and Plotly are vendored.
+
+## Credential rotation
+
+The current EV-only fine-grained dispatch token expires on **January 6, 2027**. Before expiry, replace it with the same EV-dashboard-only Actions read/write scope, update `DASHBOARD_GITHUB_TOKEN` in the ignored `.env`, recreate only the EV Airflow service while no producer/model task is running, and verify dispatch. AWS credentials remain in the authorized existing profile; no new upload user or access key was needed. Changing a mounted source directory by switching through a checkout where it is absent can leave Docker holding a stale mount. Recreate EV Airflow after such a checkout change and verify its contract/exporter paths before retrying an eligible export.
 
 ## Failure recovery
 
