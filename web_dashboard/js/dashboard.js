@@ -7,12 +7,12 @@
   const ratio = (a,b,scale=1) => a!=null&&b>0?a*scale/b:null;
   const safe = value => String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stamp = value => value?new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Unavailable';
-  const colors = ['#0875c9','#b74065','#e48a22','#449988','#7955a5'];
-  const regionColors = {Midwest:'#0875c9',Northeast:'#b74065',South:'#e48a22',West:'#7955a5'};
+  const colors = ['#3B82F6','#E8943A','#10B981','#8B5CF6','#E07B73'];
+  const regionColors = {Midwest:'#3B82F6',Northeast:'#E8943A',South:'#10B981',West:'#8B5CF6'};
   let data, busy=false, pending=false;
   function theme() {
     const dark=document.documentElement.dataset.theme==='dark';
-    return {dark, ink:dark?'#eef3f9':'#202b37',muted:dark?'#b5c3d2':'#566372',grid:dark?'#344454':'#e8edf2',blue:dark?'#50b5ff':'#0875c9',orange:dark?'#ffb15c':'#c86512',navy:dark?'#89aaff':'#2c5189'};
+    return {dark, ink:dark?'#eef3f9':'#202b37',muted:dark?'#b5c3d2':'#566372',grid:dark?'#344454':'#e8edf2',blue:dark?'#60A5FA':'#3B82F6',orange:dark?'#F5AD5A':'#E8943A',navy:dark?'#89aaff':'#2c5189'};
   }
   function table(id, rows, columns) {
     const host=$(id+'-table');host.replaceChildren();
@@ -62,7 +62,7 @@
       $('kpi-gap').parentElement.querySelector('p').textContent='EV-covered jurisdictions · registrations ÷ available stations';
       const mapRows=states.filter(r=>r.state_abbr!=='PR');
       tasks.push(plot('map',[{type:'choropleth',locationmode:'USA-states',locations:mapRows.map(r=>r.state_abbr),z:mapRows.map(r=>r.stations_per_100k_pop),text:mapRows.map(r=>safe(r.state_name)),
-        colorscale:[[0,'#fce0d5'],[.5,'#ef87ab'],[1,'#a32073']],colorbar:{title:{text:'Stations / 100k'},thickness:12,len:.75},marker:{line:{color:t.dark?'#344454':'#fff',width:.8}},
+        colorscale:[[0,'#f0fafa'],[.15,'#d4f0f0'],[.35,'#a8e0e0'],[.55,'#7ccfcf'],[.75,'#4db8b8'],[1,'#1a8a8a']],colorbar:{title:{text:'Stations / 100k'},thickness:12,len:.75},marker:{line:{color:t.dark?'#344454':'#fff',width:.8}},
         hovertemplate:'%{text}<br>%{z:,.2f} stations / 100k residents<extra></extra>'}],{geo:{scope:'usa',projection:{type:'albers usa'},bgcolor:'transparent',showlakes:false,showland:true,landcolor:t.dark?'#283440':'#eef1f5'},margin:{l:0,r:0,t:4,b:4}}));
       table('map',states,[['state_name','Jurisdiction'],['total_stations','Stations'],['population','Population'],['population_year','ACS year'],['stations_per_100k_pop','Stations / 100k']]);
       const stationRows=ranked(states,'total_stations',15);tasks.push(bars('stations',stationRows,'total_stations','Stations'));table('stations',stationRows,[['state_name','Jurisdiction'],['total_stations','Stations'],['stations_open','Available'],['stations_planned','Planned']]);
@@ -79,7 +79,7 @@
       const registrationYears=[...new Set(growth.filter(r=>r.total_ev_count!=null).map(r=>r.year))].sort((a,b)=>a-b);
       const registrations=registrationYears.map(year=>{const rows=growth.filter(r=>r.year===year&&r.total_ev_count!=null);return {year,bev_count:sum(rows,'bev_count'),phev_count:sum(rows,'phev_count'),total_ev_count:sum(rows,'total_ev_count'),coverage:rows.length};});
       tasks.push(plot('registrations',[{type:'scatter',mode:'lines+markers',name:'Battery electric',x:registrationYears,y:registrations.map(r=>r.bev_count),line:{color:t.blue},hovertemplate:'%{x}: %{y:,} BEVs<extra></extra>'},
-        {type:'scatter',mode:'lines+markers',name:'Plug-in hybrid',x:registrationYears,y:registrations.map(r=>r.phev_count),line:{color:t.navy},hovertemplate:'%{x}: %{y:,} PHEVs<extra></extra>'}],{xaxis:{dtick:1,gridcolor:t.grid,automargin:true},yaxis:{title:'Registered vehicles',gridcolor:t.grid,automargin:true,rangemode:'tozero'},margin:{l:75,r:20,t:20,b:80}}));
+        {type:'scatter',mode:'lines+markers',name:'Plug-in hybrid',x:registrationYears,y:registrations.map(r=>r.phev_count),line:{color:t.orange},hovertemplate:'%{x}: %{y:,} PHEVs<extra></extra>'}],{xaxis:{dtick:1,gridcolor:t.grid,automargin:true},yaxis:{title:'Registered vehicles',gridcolor:t.grid,automargin:true,rangemode:'tozero'},margin:{l:75,r:20,t:20,b:80}}));
       table('registrations',registrations,[['year','Registration year'],['bev_count','BEVs'],['phev_count','PHEVs'],['total_ev_count','Total EVs'],['coverage','Jurisdictions with data']]);
       const cities=ranked(data.cities.filter(r=>abbrs.has(r.state_abbr)).map(r=>({...r,label:r.city+', '+r.state_abbr})),'total_stations',15).reverse();
       tasks.push(bars('cities',cities.map(r=>({...r,state_abbr:r.label})),'total_stations','Stations',{horizontal:true,color:'orange'}));
