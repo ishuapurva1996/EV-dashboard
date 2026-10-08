@@ -6,7 +6,7 @@
 <title>EV Infrastructure &amp; Adoption</title>
 <link rel="stylesheet" href="css/dashboard.css?v=1">
 <script defer src="assets/vendor/plotly-4.1.1.min.js"></script>
-<script defer src="js/dashboard.js?v=2"></script>
+<script defer src="js/dashboard.js?v=3"></script>
 </head>
 <body>
 <a class="skip" href="#dashboard">Skip to charts</a>
@@ -15,7 +15,7 @@
 <div id="status" role="status" aria-live="polite">Loading the latest validated dashboard data…</div>
 <button id="retry" type="button" hidden>Retry loading data</button>
 <div id="content" hidden>
-<div class="toolbar"><div><label for="region">Region</label><select id="region"><option value="all">All regions</option></select></div><div><label for="state">State / jurisdiction</label><select id="state"><option value="all">All jurisdictions</option></select></div><div><label for="start-year">Growth charts from</label><select id="start-year"></select></div><p id="scope" aria-live="polite"></p></div>
+<div class="toolbar"><div><label for="region">Region</label><select id="region"><option value="all">All regions</option></select></div><div><label for="state">State / jurisdiction</label><select id="state"><option value="all">All jurisdictions</option></select></div><p id="scope" aria-live="polite"></p></div>
 <section class="kpis" aria-label="Overview metrics">
 <div><h2>Total public stations</h2><strong id="kpi-stations">—</strong><p id="station-note">Available, planned, and temporarily unavailable</p></div>
 <div><h2>EVs registered</h2><strong id="kpi-evs">—</strong><p id="ev-note"></p></div>
