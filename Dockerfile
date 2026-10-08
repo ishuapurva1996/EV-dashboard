@@ -8,3 +8,6 @@ RUN pip install --no-cache-dir \
       --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.1/constraints-3.12.txt"
 
 RUN pip install --no-cache-dir "dbt-snowflake==1.8.4"
+
+COPY requirements-dashboard.txt /tmp/requirements-dashboard.txt
+RUN pip install --no-cache-dir -r /tmp/requirements-dashboard.txt

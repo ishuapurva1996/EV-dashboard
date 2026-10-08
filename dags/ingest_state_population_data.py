@@ -1,3 +1,5 @@
+from ev_publication import now, success_receipt, source_request
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow import DAG
 from airflow.models import Variable
 from airflow.decorators import task
@@ -34,10 +36,10 @@ def extract_census_population():
             "get": "NAME,B01003_001E",
             "for": "state:*",
         }
-    r = requests.get(CENSUS_BASE, params=params, timeout=30)
+    r = source_request(CENSUS_BASE, params=params, timeout=30)
 
     if r.status_code != 200:
-        raise RuntimeError(f"API request failed: {r.status_code} {r.text}")
+        raise RuntimeError(f"API request failed: {r.status_code}")
 
     data = r.json()
     return data
@@ -59,9 +61,11 @@ def transform_census_population_data(raw_data):
 
 @task
 def load_population_data_into_snowflake(records, target_table):
+    if not records:
+        raise RuntimeError("Empty Census input; existing population data is preserved.")
+    started = now()
     connec, con = return_snowflake_conn()
     try:
-        con.execute("BEGIN")
         con.execute(f"""CREATE TABLE IF NOT EXISTS {target_table}(
                     state_fips    VARCHAR(2),                                                                                                                                   
                     state_name    VARCHAR,
@@ -70,6 +74,7 @@ def load_population_data_into_snowflake(records, target_table):
                     loaded_at     TIMESTAMP_NTZ                                                                                                                                 
                 );""")
         
+        con.execute("BEGIN")
         con.execute(f"""DELETE FROM {target_table}""")
         sql = f"""INSERT INTO {target_table} (state_fips, state_name, population, acs_year, loaded_at)
                   VALUES (%s, %s, %s, %s, %s)"""
@@ -87,6 +92,7 @@ def load_population_data_into_snowflake(records, target_table):
             )
         con.executemany(sql, rows)
         con.execute("COMMIT")
+        return success_receipt(started,source_captured_at=min(r["loaded_at"] for r in records).isoformat())
     except Exception:
         con.execute("ROLLBACK")
         raise
@@ -105,11 +111,15 @@ with DAG(
     catchup=False,
     tags=["ETL", "census", "population"],
     schedule="@yearly",
+    max_active_runs=1,
 ) as dag:
     
     target_table = 'RAW_EV.CENSUS_POPULATION'
 
     raw_data = extract_census_population()
     transform_data = transform_census_population_data(raw_data)
-    load_population_data_into_snowflake(transform_data, target_table)
+    loaded = load_population_data_into_snowflake(transform_data, target_table)
+    trigger_dbt = TriggerDagRunOperator(task_id='trigger_dbt',trigger_dag_id='ev_dbt_pipeline',
+                                       conf={'census_run_id':'{{ run_id }}'},wait_for_completion=False)
+    loaded >> trigger_dbt
     

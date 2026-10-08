@@ -1,0 +1,650 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "metadata",
+    "states",
+    "regions",
+    "growth",
+    "cities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_id",
+        "synthetic",
+        "warehouse_completed_at",
+        "exported_at",
+        "stations_captured_at",
+        "stations_source_updated_at",
+        "population_captured_at",
+        "sources"
+      ],
+      "properties": {
+        "bundle_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "warehouse_completed_at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "exported_at": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "stations_captured_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "stations_source_updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "population_captured_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "maxLength": 40
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "url"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 200
+              }
+            }
+          }
+        }
+      }
+    },
+    "states": {
+      "type": "array",
+      "maxItems": 60,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state_fips",
+          "state_abbr",
+          "state_name",
+          "census_region",
+          "total_stations",
+          "stations_open",
+          "stations_planned",
+          "stations_with_dcfast",
+          "total_level1_ports",
+          "total_level2_ports",
+          "total_dcfast_ports",
+          "total_ports",
+          "ev_data_year",
+          "bev_count",
+          "phev_count",
+          "total_ev_count",
+          "population_year",
+          "population",
+          "stations_per_100k_pop",
+          "dcfast_ports_per_100k_pop",
+          "evs_per_1k_pop",
+          "evs_per_open_station",
+          "ports_per_ev",
+          "dcfast_penetration_pct",
+          "avg_l2_per_open_station"
+        ],
+        "properties": {
+          "state_fips": {
+            "type": "string",
+            "pattern": "^[0-9]{2}$"
+          },
+          "state_abbr": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "state_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "census_region": {
+            "type": "string",
+            "enum": [
+              "Northeast",
+              "Midwest",
+              "South",
+              "West",
+              "Territory"
+            ]
+          },
+          "total_stations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_open": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_planned": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_with_dcfast": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_level1_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_level2_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_dcfast_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "ev_data_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1995,
+            "maximum": 2094
+          },
+          "bev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "phev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "population_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1995,
+            "maximum": 2094
+          },
+          "population": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_per_100k_pop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "dcfast_ports_per_100k_pop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "evs_per_1k_pop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "evs_per_open_station": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "ports_per_ev": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "dcfast_penetration_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "avg_l2_per_open_station": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          }
+        }
+      }
+    },
+    "regions": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "census_region",
+          "state_count",
+          "total_stations",
+          "stations_open",
+          "stations_with_dcfast",
+          "total_level1_ports",
+          "total_level2_ports",
+          "total_dcfast_ports",
+          "total_ports",
+          "total_ev_count",
+          "bev_count",
+          "phev_count",
+          "population",
+          "stations_per_100k_pop",
+          "evs_per_1k_pop",
+          "evs_per_open_station",
+          "dcfast_penetration_pct"
+        ],
+        "properties": {
+          "census_region": {
+            "type": "string",
+            "enum": [
+              "Northeast",
+              "Midwest",
+              "South",
+              "West",
+              "Territory"
+            ]
+          },
+          "state_count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_stations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_open": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_with_dcfast": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_level1_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_level2_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_dcfast_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "bev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "phev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "population": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_per_100k_pop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "evs_per_1k_pop": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "evs_per_open_station": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000.0
+          },
+          "dcfast_penetration_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    "growth": {
+      "type": "array",
+      "maxItems": 6000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state_fips",
+          "state_abbr",
+          "state_name",
+          "year",
+          "new_stations",
+          "new_total_ports",
+          "cumulative_stations",
+          "cumulative_total_ports",
+          "bev_count",
+          "phev_count",
+          "total_ev_count",
+          "ev_yoy_growth_pct",
+          "population_latest",
+          "population_year",
+          "stations_yoy_growth_pct"
+        ],
+        "properties": {
+          "state_fips": {
+            "type": "string",
+            "pattern": "^[0-9]{2}$"
+          },
+          "state_abbr": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "state_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 1995,
+            "maximum": 2094
+          },
+          "new_stations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "new_total_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "cumulative_stations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "cumulative_total_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "bev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "phev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ev_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "ev_yoy_growth_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -100,
+            "maximum": 1000000
+          },
+          "population_latest": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "population_year": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1995,
+            "maximum": 2094
+          },
+          "stations_yoy_growth_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -100,
+            "maximum": 1000000
+          }
+        }
+      }
+    },
+    "cities": {
+      "type": "array",
+      "maxItems": 1200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state_fips",
+          "state_abbr",
+          "state_name",
+          "city",
+          "total_stations",
+          "stations_open",
+          "stations_with_dcfast",
+          "total_level2_ports",
+          "total_dcfast_ports",
+          "total_ports",
+          "national_rank",
+          "state_rank"
+        ],
+        "properties": {
+          "state_fips": {
+            "type": "string",
+            "pattern": "^[0-9]{2}$"
+          },
+          "state_abbr": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$"
+          },
+          "state_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "total_stations": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_open": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "stations_with_dcfast": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_level2_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_dcfast_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "total_ports": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "national_rank": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          },
+          "state_rank": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000000
+          }
+        }
+      }
+    }
+  }
+}

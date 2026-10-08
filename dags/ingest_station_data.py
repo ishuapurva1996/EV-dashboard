@@ -1,3 +1,4 @@
+from ev_publication import now, success_receipt, source_request
 from airflow import DAG
 from airflow.models import Variable
 from airflow.decorators import task
@@ -14,7 +15,7 @@ import os
 
 load_dotenv(find_dotenv())
 
-NREL_BASE = "https://developer.nrel.gov/api/alt-fuel-stations/v1"
+NREL_BASE = "https://developer.nlr.gov/api/alt-fuel-stations/v1"
 TARGET_TABLE = "RAW_EV.NREL_STATIONS"
 SNOWFLAKE_CONN_ID = "snowflake_default"
 HIGH_WATER_MARK_VAR = "nrel_last_updated"
@@ -27,7 +28,7 @@ def return_snowflake_conn():
       
       # Execute the query and fetch results
       conn = hook.get_conn()
-      return conn.cursor()
+      return conn, conn.cursor()
 
 def extract_ev_raw_data(NREL_BASE):
     api_key = os.environ["NREL_API_KEY"]
@@ -39,10 +40,10 @@ def extract_ev_raw_data(NREL_BASE):
             "access": "public",
             "limit": "all",
         }
-    r = requests.get(NREL_BASE, params=params)
+    r = source_request(NREL_BASE, params=params, timeout=(10,120))
 
     if r.status_code != 200:
-        raise RuntimeError(f"API request failed: {r.status_code} {r.text}")
+        raise RuntimeError(f"API request failed: {r.status_code}")
 
     data = r.json()
     return data
@@ -60,6 +61,8 @@ def transform_ev_data(raw_data):
             f"NREL count mismatch: header says {raw_data['total_results']}, got {len(stations)}"
         )
 
+    if not stations:
+        raise RuntimeError('Empty NREL source; existing station data is preserved.')
     records = []
     for s in stations:
         connectors = s.get("ev_connector_types") or []
@@ -92,10 +95,10 @@ def transform_ev_data(raw_data):
 @task
 def check_last_updated(nrel_base):
     api_key = os.environ["NREL_API_KEY"]
-    r = requests.get(f"{nrel_base}/last-updated.json", params={"api_key": api_key})
+    r = source_request(f"{nrel_base}/last-updated.json", params={"api_key": api_key}, timeout=(10,30))
 
     if r.status_code != 200:
-        raise RuntimeError(f"NREL last-updated HTTP {r.status_code}: {r.text}")
+        raise RuntimeError(f"NREL last-updated HTTP {r.status_code}")
 
     body = r.json()
     if "last_updated" not in body:
@@ -120,15 +123,19 @@ def extract_transform_load(nrel_base, target_table):
     """Single task to keep the 280MB raw dict and 81k-record list in memory,
     instead of round-tripping them through XCom (which is JSON-into-Postgres,
     capped at ~1GB per row)."""
+    started = now()
     raw_data = extract_ev_raw_data(nrel_base)
+    captured = now()
     records = transform_ev_data(raw_data)
     load_data_to_snowflake(records, target_table)
+    from airflow.operators.python import get_current_context
+    source_updated = get_current_context()['ti'].xcom_pull(task_ids='check_last_updated')
+    return success_receipt(started,source_captured_at=captured,source_last_updated_at=source_updated)
 
 
 def load_data_to_snowflake(records, target_table):
-    con = return_snowflake_conn()
+    connection, con = return_snowflake_conn()
     try:
-        con.execute("BEGIN")
         con.execute(f"""CREATE TABLE IF NOT EXISTS {target_table}(
                     id                  NUMBER PRIMARY KEY,
                     station_name        VARCHAR,
@@ -152,6 +159,7 @@ def load_data_to_snowflake(records, target_table):
                     open_date           DATE
                     );""")
         
+        con.execute("BEGIN")
         con.execute(f"""DELETE FROM {target_table}""")
 
         sql = f"""
@@ -178,8 +186,10 @@ def load_data_to_snowflake(records, target_table):
 
     except Exception as e:
         con.execute("ROLLBACK")
-        print(e)
         raise
+    finally:
+        con.close()
+        connection.close()
 
 
 with DAG(
@@ -189,6 +199,7 @@ with DAG(
     catchup=False,
     tags=["ETL", "nrel", "ev"],
     schedule='30 02 * * *',
+    max_active_runs=1,
 ) as dag:
     
     current_ts = check_last_updated(NREL_BASE)
@@ -199,6 +210,7 @@ with DAG(
         task_id="trigger_dbt",
         trigger_dag_id="ev_dbt_pipeline",
         wait_for_completion=False,
+        conf={"nrel_run_id": "{{ run_id }}"},
     )
 
     current_ts >> loaded >> final >> trigger_dbt   # gate → ETL → watermark → dbt

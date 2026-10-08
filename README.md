@@ -6,6 +6,13 @@ End-to-end data pipeline analyzing US EV charging station coverage and cross-ref
 
 **Team:** Pragya Apurva, Pragya Chourasia, Pinal Pawar, Sanjana Reddy Khatam.
 
+
+## GitHub Pages companion
+
+The static companion preserves the existing Preset chart layout and adds state/region controls, source-date details, accessible data tables, and a saved light/dark theme. Its publication code follows the movie project: successful Airflow and dbt processing → validated private S3 export → GitHub Actions → Pages.
+
+**Real export verified; Pages publication is being verified.** Real source loads, all 11 models, all 145 warehouse tests, and the private export succeeded on October 8, 2026 using the current working Snowflake account. The checked-in snapshot preserves that export and its original dates. See [dashboard setup and recovery](docs/DASHBOARD_OPERATIONS.md) for settings, schedules, and verification. A verified live link and preview will be added after deployment succeeds.
+
 ---
 
 ## Architecture
@@ -33,11 +40,11 @@ End-to-end data pipeline analyzing US EV charging station coverage and cross-ref
 | git | any modern | already on macOS / Windows installer |
 
 You also need:
-- Your own **Snowflake training login** (user + password from your instructor) — each teammate has a personal account in the shared `SFEDU02-EAB27764` org.
-- A free **NREL API key** — <https://developer.nrel.gov/signup/> (instant).
+- A working **Snowflake login**, database, role, and warehouse. The current deployment reuses the same account as weather and movie with separate EV schemas.
+- A free **NREL API key** — <https://developer.nlr.gov/signup/> (instant).
 - A free **Census API key** — <https://api.census.gov/data/key_signup.html> (instant).
 
-> **Shared resources:** the project's three Snowflake schemas (`RAW_EV`, `CURATED_EV`, `ANALYTICS_EV`) live in **one shared database — `USER_DB_BADGER`**. Each teammate logs in with their *own* user/password but reads and writes to that same shared DB. The `TRAINING_ROLE` already has cross-DB access in this class's setup, so no extra Snowflake grants are needed.
+> **EV schemas:** `RAW_EV`, `STAGING_EV`, `CURATED_EV`, and `ANALYTICS_EV` live in the selected database. The current deployment uses the existing `WEATHER_FORECASTING` database. The original `snowflake/setup.sql` targets an old training account; adapt its account/database/role before using it elsewhere.
 
 ---
 
@@ -58,14 +65,14 @@ cd EV-pipeline
 cp .env.example .env
 ```
 
-The file already has the **shared values** filled in (account, database, schema, role). You only need to fill in the **personal** fields:
+Fill in the current Snowflake account, database, schema, role, warehouse, and private login from your existing connection. The remaining private settings are:
 
 | Variable | Where to get it |
 |---|---|
-| `SNOWFLAKE_USER` | your training username (e.g., `EAGLE`) — given by instructor |
-| `SNOWFLAKE_PASSWORD` | given by instructor |
-| `SNOWFLAKE_WAREHOUSE` | your own warehouse (e.g., `EAGLE_QUERY_WH`) |
-| `NREL_API_KEY` | from <https://developer.nrel.gov/signup/> |
+| `SNOWFLAKE_USER` | your existing Snowflake username |
+| `SNOWFLAKE_PASSWORD` | your existing private Snowflake password |
+| `SNOWFLAKE_WAREHOUSE` | your existing warehouse |
+| `NREL_API_KEY` | from <https://developer.nlr.gov/signup/> |
 | `CENSUS_API_KEY` | from <https://api.census.gov/data/key_signup.html> |
 
 > **Never commit `.env`.** It's already in `.gitignore`. Each teammate has their own.
@@ -111,7 +118,7 @@ Subsequent restarts are quick — only `up -d` is needed unless you change the `
 
 ### 6. Register the Snowflake connection in Airflow
 
-1. Open <http://localhost:8081> — login `airflow` / `airflow`.
+1. Open <http://localhost:8083> and use the private EV Airflow login configured in `.env`. If `AIRFLOW_CONN_SNOWFLAKE_DEFAULT` is already configured, the runtime connection is supplied by that environment variable and no duplicate UI connection is required.
 2. **Admin → Connections → `+`** (top-left).
 3. Fill in:
 
@@ -125,7 +132,7 @@ Subsequent restarts are quick — only `up -d` is needed unless you change the `
    | Account | your `SNOWFLAKE_ACCOUNT` |
    | Warehouse | your `SNOWFLAKE_WAREHOUSE` |
    | Database | your `SNOWFLAKE_DATABASE` |
-   | Role | `TRAINING_ROLE` |
+   | Role | your `SNOWFLAKE_ROLE` |
 
 4. Click **Test** → wait for green "Connection successfully tested" → **Save**.
 
@@ -212,8 +219,8 @@ EV-pipeline/
 |---|---|---|
 | `dbt` CLI on your Mac | local `ev_env` venv | env vars (`set -a && . .env && set +a`) |
 | Airflow scheduler + webserver | Docker container | `.env` auto-loaded via `env_file:` in compose |
-| `dbt` triggered by an Airflow DAG | inside Airflow container | same `.env` env vars + `DBT_PROFILES_DIR=/opt/airflow/dbt` |
-| Native Snowflake operators (`SnowflakeOperator`, `SnowflakeHook`) | inside Airflow container | the `snowflake_default` Airflow connection (per-machine, registered manually) |
+| `dbt` triggered by an Airflow DAG | inside Airflow container | credentials derived from the `snowflake_default` connection; project-local profiles |
+| Native Snowflake operators (`SnowflakeOperator`, `SnowflakeHook`) | inside Airflow container | the `snowflake_default` Airflow connection (private environment JSON or UI) |
 
 `dbt/profiles.yml` is **committed** but contains no secrets — only `{{ env_var(...) }}` references that resolve at runtime.
 
@@ -221,15 +228,16 @@ EV-pipeline/
 
 ## Snowflake schema layout
 
-All four teammates read/write to the **same** three schemas in `USER_DB_BADGER`:
+The EV pipeline reads/writes four separate schemas in its configured database:
 
 | Schema | Purpose | Populated by |
 |---|---|---|
 | `RAW_EV` | Untransformed JSON / CSV from APIs | Airflow ingestion DAGs |
-| `CURATED_EV` | Cleaned, standardized, joined | dbt `models/staging` + `models/curated` |
+| `STAGING_EV` | Cleaned source views | dbt `models/staging` |
+| `CURATED_EV` | Standardized facts and dimensions | dbt `models/curated` + dimension seed |
 | `ANALYTICS_EV` | Final aggregates for dashboards | dbt `models/analytics` |
 
-These were created once via `snowflake/setup.sql` (run by Pragya in the Snowflake worksheet UI). You don't need to re-run it.
+The current deployment already has these schemas. The old `snowflake/setup.sql` contains training-account values; do not execute it against another account unchanged.
 
 > **Heads up on collaboration:** since we share schemas, two people running `dbt run` simultaneously can overwrite the same table mid-build. Easy mitigation — give a heads-up in chat ("running dbt now, hold off ~5 min") before kicking off a build.
 

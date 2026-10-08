@@ -1,0 +1,127 @@
+name: Deploy dashboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web_dashboard/**'
+      - 'scripts/export_dashboard.py'
+      - 'scripts/build_dashboard_site.py'
+      - 'requirements-dashboard.txt'
+      - '.github/workflows/deploy-dashboard.yml'
+
+permissions:
+  contents: read
+
+# Resolve main and the data pointer only after acquiring this group.
+concurrency:
+  group: ev-dashboard-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ishuapurva1996/EV-dashboard' && vars.DASHBOARD_PUBLICATION_MODE == 'airflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      AWS_REGION: ${{ vars.DASHBOARD_AWS_REGION }}
+      DASHBOARD_S3_BUCKET: ${{ secrets.DASHBOARD_S3_BUCKET }}
+      DASHBOARD_S3_PREFIX: ${{ secrets.DASHBOARD_S3_PREFIX }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      # Explicit main avoids restoring event code on an old push/dispatch rerun.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Set private selection path
+        run: echo "DASHBOARD_STATE=$RUNNER_TEMP/dashboard-selection.json" >> "$GITHUB_ENV"
+      - name: Install validation dependencies
+        run: python -m pip install -r requirements-dashboard.txt
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.DASHBOARD_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.DASHBOARD_AWS_REGION }}
+          mask-aws-account-id: true
+          role-session-name: ev-dashboard-pages
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Assemble from current main and latest validated bundle
+        run: python scripts/build_dashboard_site.py --assemble --state "$DASHBOARD_STATE"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+          name: dashboard-attempt-1
+      - name: Recheck both inputs immediately before deployment
+        id: check1
+        run: python scripts/build_dashboard_site.py --recheck --state "$DASHBOARD_STATE"
+
+      # A changed input restarts assembly, including checkout/reloading main code.
+      - name: Reassemble changed inputs
+        if: steps.check1.outputs.current != 'true'
+        run: python scripts/build_dashboard_site.py --assemble --state "$DASHBOARD_STATE"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: steps.check1.outputs.current != 'true'
+        with:
+          path: _site
+          name: dashboard-attempt-2
+      - name: Recheck second artifact
+        if: steps.check1.outputs.current != 'true'
+        id: check2
+        run: python scripts/build_dashboard_site.py --recheck --state "$DASHBOARD_STATE"
+      - name: Reassemble latest changes once more
+        if: steps.check1.outputs.current != 'true' && steps.check2.outputs.current != 'true'
+        run: python scripts/build_dashboard_site.py --assemble --state "$DASHBOARD_STATE"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: steps.check1.outputs.current != 'true' && steps.check2.outputs.current != 'true'
+        with:
+          path: _site
+          name: dashboard-attempt-3
+      - name: Recheck third artifact
+        if: steps.check1.outputs.current != 'true' && steps.check2.outputs.current != 'true'
+        id: check3
+        run: python scripts/build_dashboard_site.py --recheck --state "$DASHBOARD_STATE"
+      - name: Require a current complete artifact
+        if: steps.check1.outputs.current != 'true' && steps.check2.outputs.current != 'true' && steps.check3.outputs.current != 'true'
+        run: |
+          echo 'Inputs kept changing. The previous Pages site is preserved; rerun this workflow.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+      - name: Deploy validated artifact
+        id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          artifact_name: ${{ steps.check1.outputs.current == 'true' && 'dashboard-attempt-1' || steps.check2.outputs.current == 'true' && 'dashboard-attempt-2' || 'dashboard-attempt-3' }}
+      - name: Verify public bundle identity
+        env:
+          PAGES_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, time, urllib.request
+          selection = json.load(open(os.environ['DASHBOARD_STATE']))
+          url = os.environ['PAGES_URL'].rstrip('/') + '/data/dashboard.json'
+          for attempt in range(12):
+              try:
+                  body = urllib.request.urlopen(url + '?verify=' + str(time.time_ns()), timeout=20).read()
+                  if hashlib.sha256(body).hexdigest() == selection['sha256']:
+                      break
+              except Exception:
+                  pass
+              time.sleep(5)
+          else:
+              raise SystemExit('Pages did not serve the selected validated bundle; inspect the deployment.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Verified public bundle `' + selection['bundle_id'] + '` at ' + os.environ['PAGES_URL'] + '\n')
+          PY
+      - name: Report failed publication
+        if: failure()
+        run: echo 'Dashboard publication failed. Inspect this run before calling the dashboard updated. A failed assembly never replaces the last successful deployment.' >> "$GITHUB_STEP_SUMMARY"
