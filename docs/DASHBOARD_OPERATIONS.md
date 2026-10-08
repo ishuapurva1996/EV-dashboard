@@ -2,9 +2,9 @@
 
 ## Current verification status
 
-The static companion and publication code are prepared. GitHub Pages deployment and automatic refresh have not yet been verified. The original EV training-account connection returned Snowflake error 290404 (HTTP 404). A real export is required before deploying: synthetic browser fixtures are never a production fallback.
+The static companion and publication code are prepared. GitHub Pages deployment and automatic refresh have not yet been verified. The owner authorized their current Snowflake account; its connection was verified and the four EV schemas created in the existing `WEATHER_FORECASTING` database. The original EV training account was unavailable. A real complete pipeline export is still required before deploying: synthetic browser fixtures are never a production fallback.
 
-The station provider retired `developer.nrel.gov` on May 29, 2026. Ingestion uses the documented `developer.nlr.gov` replacement. Existing keys remain valid according to the [official transition notice](https://developer.nlr.gov/docs/nlr-domain-transition/). The saved EV key has not been tested at this hostname; owner authorization is pending. The Census 2024 API connection was verified successfully.
+The station provider retired `developer.nrel.gov` on May 29, 2026. Ingestion uses the documented `developer.nlr.gov` replacement. Existing keys remain valid according to the [official transition notice](https://developer.nlr.gov/docs/nlr-domain-transition/). The owner authorized the saved EV key at this hostname. Bounded timestamp and one-station checks returned HTTP 200 on October 8, 2026, with the expected ingestion fields; full ingestion has not yet run. The Census 2024 API connection was also verified successfully.
 
 ## Data path
 
@@ -39,7 +39,7 @@ Keep credentials private. Token creation, credential expansion or IAM changes re
 
 ## AWS scope
 
-Keep Block Public Access enabled. The writer needs scoped `s3:GetObject` and `s3:PutObject` for `dashboard/ev/latest-success.json` and `dashboard/ev/bundles/*`; first-pointer absence detection may require a prefix-restricted `s3:ListBucket` permission depending on the credential/policy. S3 writes use `IfNoneMatch` for immutable objects and `IfMatch` or `IfNoneMatch` for the success pointer. An older build/export cannot replace a newer pointer. Verify the stored immutable bytes before advancing the pointer. Never expire the currently referenced bundle.
+Keep Block Public Access enabled. The writer needs scoped `s3:GetObject` and `s3:PutObject` for `dashboard/ev/latest-success.json` and `dashboard/ev/bundles/*`; give the writer `s3:ListBucket` on the bucket with `StringEquals` condition `s3:prefix = dashboard/ev/latest-success.json`. A first missing pointer can return 403 without unrestricted listing rights. The exporter then checks only this exact prefix with `MaxKeys=1`; only a confirmed empty, non-truncated listing permits initialization. An unreadable existing pointer or failed/uncertain listing stops publication. S3 writes use `IfNoneMatch` for immutable objects and `IfMatch` or `IfNoneMatch` for the success pointer. An older build/export cannot replace a newer pointer. Verify the stored immutable bytes before advancing the pointer. Never expire the currently referenced bundle.
 
 The GitHub reader needs only `s3:GetObject` on those same keys. Restrict AWS OIDC audience to `sts.amazonaws.com` and subject to this exact repository/environment. Verify the repository's actual OIDC subject configuration before applying trust: newer repositories may include immutable owner/repository IDs. Restrict `github-pages` deployments to main and retain any existing protection rules. Use a distinct reader role; do not expand the movie role or share its dispatch token.
 

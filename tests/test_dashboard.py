@@ -78,6 +78,34 @@ class PublicationTests(unittest.TestCase):
         s3=MemoryS3();s3.fail_bundle=True;b=bundle()
         with self.assertRaises(S3Error):publish_bundle(s3,'bucket','dashboard/ev',serialize(b),b['metadata'],'run',lambda:None)
         self.assertNotIn('dashboard/ev/latest-success.json',s3.objects)
+    def test_first_pointer_403_requires_confirmed_scoped_absence(self):
+        s3=MemoryS3();original=s3.get_object
+        def denied_pointer(**kw):
+            if kw['Key'].endswith('latest-success.json'):raise S3Error('AccessDenied')
+            return original(**kw)
+        s3.get_object=denied_pointer
+        s3.list_objects_v2=Mock(return_value={'Contents':[], 'IsTruncated':False})
+        b=bundle()
+        publish_bundle(s3,'bucket','dashboard/ev',serialize(b),b['metadata'],'first',lambda:None)
+        s3.list_objects_v2.assert_called_once_with(Bucket='bucket',Prefix='dashboard/ev/latest-success.json',MaxKeys=1)
+        old=s3.objects['dashboard/ev/latest-success.json']
+        s3.list_objects_v2.return_value={'Contents':[{'Key':'dashboard/ev/latest-success.json'}], 'IsTruncated':False}
+        with self.assertRaises(S3Error):publish_bundle(s3,'bucket','dashboard/ev',serialize(b),b['metadata'],'retry',lambda:None)
+        self.assertEqual(old,s3.objects['dashboard/ev/latest-success.json'])
+    def test_pointer_403_never_initializes_from_uncertain_or_denied_listing(self):
+        for listing in ({'Contents':[], 'IsTruncated':True}, {'Contents':[]}, S3Error('AccessDenied')):
+            with self.subTest(listing=listing):
+                s3=MemoryS3();original=s3.get_object
+                def denied_pointer(**kw):
+                    if kw['Key'].endswith('latest-success.json'):raise S3Error('AccessDenied')
+                    return original(**kw)
+                s3.get_object=denied_pointer
+                s3.list_objects_v2=Mock()
+                if isinstance(listing,Exception):s3.list_objects_v2.side_effect=listing
+                else:s3.list_objects_v2.return_value=listing
+                b=bundle()
+                with self.assertRaises(S3Error):publish_bundle(s3,'bucket','dashboard/ev',serialize(b),b['metadata'],'first',lambda:None)
+                self.assertNotIn('dashboard/ev/latest-success.json',s3.objects)
     def test_older_export_does_not_overwrite_newer(self):
         s3=MemoryS3();b=bundle();publish_bundle(s3,'bucket','dashboard/ev',serialize(b),b['metadata'],'new',lambda:None)
         old=s3.objects['dashboard/ev/latest-success.json'];b['metadata']['warehouse_completed_at']='2026-10-07T09:00:00Z'

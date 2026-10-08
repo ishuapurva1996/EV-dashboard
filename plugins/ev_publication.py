@@ -263,7 +263,15 @@ def publish_bundle(s3, bucket, path, body, metadata, run_id, guard):
             raise RuntimeError('No conditional pointer identity available.')
         condition = {'IfMatch': etag}
     except Exception as exc:
-        if getattr(exc, 'response', {}).get('Error', {}).get('Code') not in {'NoSuchKey', '404'}:
+        code = getattr(exc, 'response', {}).get('Error', {}).get('Code')
+        if code in {'AccessDenied', '403'}:
+            # A missing key can return 403 without unrestricted ListBucket.
+            # Confirm absence with the one permitted prefix; never treat an
+            # unreadable existing pointer or an uncertain listing as missing.
+            listing = s3.list_objects_v2(Bucket=bucket, Prefix=pointer_key, MaxKeys=1)
+            if listing.get('Contents') or listing.get('IsTruncated') is not False:
+                raise
+        elif code not in {'NoSuchKey', '404'}:
             raise
         condition = {'IfNoneMatch': '*'}
     pointer = dict(schema_version=1, bundle_id=metadata['bundle_id'], sha256=digest, bundle_key=key, run_id=run_id,
