@@ -8,6 +8,7 @@
   const safe = value => String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stamp = value => value?new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Unavailable';
   const colors = ['#0875c9','#b74065','#e48a22','#449988','#7955a5'];
+  const regionColors = {Midwest:'#0875c9',Northeast:'#b74065',South:'#e48a22',West:'#7955a5'};
   let data, busy=false, pending=false;
   function theme() {
     const dark=document.documentElement.dataset.theme==='dark';
@@ -39,7 +40,7 @@
   function bars(id,rows,field,label,{horizontal=false,percent=false,color='blue'}={}) {
     const t=theme(),labels=rows.map(r=>r.state_abbr||r.census_region||r.label),values=rows.map(r=>r[field]);
     return plot(id,[{type:'bar',x:horizontal?values:labels,y:horizontal?labels:values,orientation:horizontal?'h':'v',
-      marker:{color:t[color]},hovertemplate:horizontal?'%{y}: %{x:,.2f}'+(percent?'%':'')+'<extra></extra>':'%{x}: %{y:,.2f}<extra></extra>'}],
+      marker:{color:Array.isArray(color)?color:t[color]},hovertemplate:horizontal?'%{y}: %{x:,.2f}'+(percent?'%':'')+'<extra></extra>':'%{x}: %{y:,.2f}<extra></extra>'}],
       horizontal?{margin:{l:65,r:24,t:12,b:50},xaxis:{title:label,gridcolor:t.grid,zerolinecolor:t.grid,automargin:true,ticksuffix:percent?'%':''},yaxis:{autorange:'reversed',automargin:true}}:
       {yaxis:{title:label,gridcolor:t.grid,zerolinecolor:t.grid,automargin:true,rangemode:'tozero'}});
   }
@@ -83,10 +84,11 @@
       const cities=ranked(data.cities.filter(r=>abbrs.has(r.state_abbr)).map(r=>({...r,label:r.city+', '+r.state_abbr})),'total_stations',15).reverse();
       tasks.push(bars('cities',cities.map(r=>({...r,state_abbr:r.label})),'total_stations','Stations',{horizontal:true,color:'orange'}));
       table('cities',cities.slice().reverse(),[['city','City'],['state_abbr','State'],['total_stations','Stations'],['stations_open','Available stations']]);
-      const regions=[...new Set(states.map(r=>r.census_region))].sort().map(census_region=>{const rows=states.filter(r=>r.census_region===census_region),ev=rows.filter(r=>r.total_ev_count!=null);return {census_region,total_stations:sum(rows,'total_stations'),total_ev_count:sum(ev,'total_ev_count'),stations_open:sum(ev,'stations_open'),evs_per_open_station:ratio(sum(ev,'total_ev_count'),sum(ev,'stations_open'))};});
-      tasks.push(plot('regions',[{type:'pie',hole:.5,labels:regions.map(r=>r.census_region),values:regions.map(r=>r.total_stations),sort:false,textinfo:'label+percent',marker:{colors},hovertemplate:'%{label}: %{value:,} stations (%{percent})<extra></extra>'}],{margin:{l:35,r:35,t:30,b:60},showlegend:false}));
+      const regionStates=states.filter(r=>Object.hasOwn(regionColors,r.census_region));
+      const regions=[...new Set(regionStates.map(r=>r.census_region))].sort().map(census_region=>{const rows=regionStates.filter(r=>r.census_region===census_region),ev=rows.filter(r=>r.total_ev_count!=null);return {census_region,total_stations:sum(rows,'total_stations'),total_ev_count:sum(ev,'total_ev_count'),stations_open:sum(ev,'stations_open'),evs_per_open_station:ratio(sum(ev,'total_ev_count'),sum(ev,'stations_open'))};});
+      tasks.push(plot('regions',[{type:'pie',hole:.5,labels:regions.map(r=>r.census_region),values:regions.map(r=>r.total_stations),sort:false,textinfo:'label+percent',marker:{colors:regions.map(r=>regionColors[r.census_region])},hovertemplate:'%{label}: %{value:,} stations (%{percent})<extra></extra>'}],{margin:{l:35,r:35,t:30,b:60},showlegend:false}));
       table('regions',regions,[['census_region','Region'],['total_stations','Stations']]);
-      tasks.push(bars('region-gap',regions,'evs_per_open_station','EVs / open station',{horizontal:true}));table('region-gap',regions,[['census_region','Region'],['total_ev_count','Registered EVs'],['stations_open','EV-covered available stations'],['evs_per_open_station','EVs / open station']]);
+      tasks.push(bars('region-gap',regions,'evs_per_open_station','EVs / open station',{horizontal:true,color:regions.map(r=>regionColors[r.census_region])}));table('region-gap',regions,[['census_region','Region'],['total_ev_count','Registered EVs'],['stations_open','EV-covered available stations'],['evs_per_open_station','EVs / open station']]);
       const fast=ranked(states,'dcfast_penetration_pct',20),l2=ranked(states,'avg_l2_per_open_station',20);
       tasks.push(bars('fast',fast,'dcfast_penetration_pct','Share of station locations',{horizontal:true,percent:true,color:'orange'}));table('fast',fast,[['state_name','Jurisdiction'],['stations_with_dcfast','Stations with DC fast'],['total_stations','All stations'],['dcfast_penetration_pct','Share (%)']]);
       tasks.push(bars('l2',l2,'avg_l2_per_open_station','Level 2 ports / open station',{horizontal:true}));table('l2',l2,[['state_name','Jurisdiction'],['total_level2_ports','Level 2 ports'],['stations_open','Available stations'],['avg_l2_per_open_station','Level 2 / open station']]);
