@@ -1,0 +1,23 @@
+name: Validate EV dashboard
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dashboard.txt requests
+      - name: Validate contracts, export failure handling, and publication guards
+        run: python -m unittest discover -s tests -v
+      - name: Check Python sources
+        run: python -m compileall -q dags plugins scripts
+      - name: Check browser source
+        run: node --check web_dashboard/js/dashboard.js

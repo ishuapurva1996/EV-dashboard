@@ -1,0 +1,80 @@
+name: Publish dashboard snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web_dashboard/**'
+      - 'scripts/build_dashboard_site.py'
+      - 'scripts/export_dashboard.py'
+      - 'requirements-dashboard.txt'
+      - '.github/workflows/deploy-dashboard-snapshot.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ev-dashboard-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && github.repository == 'ishuapurva1996/EV-dashboard' && vars.DASHBOARD_PUBLICATION_MODE != 'airflow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dashboard.txt
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - name: Assemble reviewed real snapshot
+        run: python scripts/build_dashboard_site.py --snapshot --state "$RUNNER_TEMP/snapshot-selection.json"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+      - name: Require current main before deployment
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, 'scripts')
+          from build_dashboard_site import _main_commit
+          selection = json.load(open(os.environ['RUNNER_TEMP'] + '/snapshot-selection.json'))
+          if _main_commit() != selection['commit']:
+              raise SystemExit('Main changed during assembly. Rerun to publish current code and data.')
+          PY
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        id: deploy
+      - name: Verify public snapshot
+        env:
+          PAGES_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, time, urllib.request
+          selection = json.load(open(os.environ['RUNNER_TEMP'] + '/snapshot-selection.json'))
+          url = os.environ['PAGES_URL'].rstrip('/') + '/data/dashboard.json'
+          for attempt in range(12):
+              try:
+                  body = urllib.request.urlopen(url + '?verify=' + str(time.time_ns()), timeout=20).read()
+                  if hashlib.sha256(body).hexdigest() == selection['sha256']:
+                      break
+              except Exception:
+                  pass
+              time.sleep(5)
+          else:
+              raise SystemExit('Public snapshot did not match the reviewed export.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write('Verified reviewed snapshot at ' + os.environ['PAGES_URL'] + '\n')
+          PY

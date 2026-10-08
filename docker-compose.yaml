@@ -75,6 +75,8 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/dbt:/opt/airflow/dbt
+    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts:ro
+    - ${AIRFLOW_PROJ_DIR:-.}/web_dashboard:/opt/airflow/web_dashboard:ro
     - /var/run/docker.sock:/var/run/docker.sock
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
@@ -103,7 +105,7 @@ services:
     command: >
       bash -c "airflow scheduler & airflow webserver"
     ports:
-      - "8081:8080"
+      - "${EV_AIRFLOW_PORT:-8083}:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s

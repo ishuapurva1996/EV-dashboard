@@ -6,6 +6,13 @@ End-to-end data pipeline analyzing US EV charging station coverage and cross-ref
 
 **Team:** Pragya Apurva, Pragya Chourasia, Pinal Pawar, Sanjana Reddy Khatam.
 
+
+## GitHub Pages companion
+
+The static companion preserves the existing Preset chart layout and adds state/region controls, source-date details, accessible data tables, and a saved light/dark theme. Its publication code follows the movie project: successful Airflow and dbt processing → validated private S3 export → GitHub Actions → Pages.
+
+**Publication is pending configuration and a real export.** The saved EV Snowflake training account is unavailable; no synthetic preview data will be published. See [dashboard setup and recovery](docs/DASHBOARD_OPERATIONS.md) for the exact credentials, repository settings, schedules, and verification steps. A verified live link and preview will be added after deployment succeeds.
+
 ---
 
 ## Architecture

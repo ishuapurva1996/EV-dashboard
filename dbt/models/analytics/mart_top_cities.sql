@@ -15,11 +15,11 @@ ranked as (
         total_dcfast_ports,
         total_ports,
 
-        row_number() over (order by total_stations desc, city)
+        row_number() over (order by total_stations desc, city, state_abbr)
             as national_rank,
 
         row_number() over (partition by state_fips
-                           order by total_stations desc, city)
+                           order by total_stations desc, city, state_abbr)
             as state_rank
     from cities
 )
